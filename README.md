@@ -1,94 +1,158 @@
-# Kharcha
+# Building the Kharcha APK
 
-An offline expense tracker for Pakistani bank and wallet SMS. Reads your
-existing inbox, keeps reading new messages, groups spending by month, and learns
-merchant categories from a single tap.
+This project is a native Kotlin Android app. You can build and install the APK locally or use GitHub Actions to build it automatically.
 
-Nothing leaves the device. There is no `INTERNET` permission in the manifest,
-and adding one would be a regression.
+## Option 1: Build the APK in Android Studio
 
-## Getting an APK
+### 1. Open the project
 
-Push this folder to a GitHub repo. The workflow builds a debug APK on GitHub's
-runners and attaches it to the run.
+Open the project folder in **Android Studio**.
 
+Wait for Gradle sync to finish. If Android Studio asks to install a required SDK or JDK version, install the recommended version.
+
+### 2. Build the debug APK
+
+From the Android Studio menu:
+
+**Build > Build Bundle(s) / APK(s) > Build APK(s)**
+
+Once the build finishes, Android Studio will show a notification with a link to the generated APK.
+
+The APK will usually be located at:
+
+```text
+app/build/outputs/apk/debug/app-debug.apk
 ```
-git init && git add . && git commit -m "Kharcha"
-git remote add origin git@github.com:YOU/kharcha.git
+
+### 3. Install it on your Android phone
+
+Transfer `app-debug.apk` to your phone and open it.
+
+Android may ask you to allow installation from the app you used to open the APK, such as Files or Chrome. Enable **Allow from this source**, then install the app.
+
+Because Kharcha requests `READ_SMS`, Google Play Protect may show a warning for a sideloaded build. Review the warning and only install builds you created or trust.
+
+---
+
+## Option 2: Build from the command line
+
+Make sure you have the Android SDK and JDK required by the project installed.
+
+From the project root:
+
+```bash
+./gradlew assembleDebug
+```
+
+On Windows:
+
+```bash
+gradlew.bat assembleDebug
+```
+
+The generated APK will be available at:
+
+```text
+app/build/outputs/apk/debug/app-debug.apk
+```
+
+You can also install it directly to a connected Android device:
+
+```bash
+./gradlew installDebug
+```
+
+Make sure **Developer Options** and **USB Debugging** are enabled on the device.
+
+---
+
+## Option 3: Build the APK with GitHub Actions
+
+You can use GitHub Actions to build the APK without installing Android Studio locally.
+
+### 1. Push the project to GitHub
+
+From the project folder:
+
+```bash
+git init
+git add .
+git commit -m "Initial commit"
+git branch -M main
+git remote add origin git@github.com:YOUR_USERNAME/kharcha.git
 git push -u origin main
 ```
 
-Then **Actions > Build APK > latest run > Artifacts > kharcha-debug**. Unzip,
-transfer to your phone, install.
+Replace `YOUR_USERNAME` with your GitHub username.
 
-Play Protect will block it. That's the right call on its part — a sideloaded app
-requesting `READ_SMS` is the signature of a banking trojan. Tap **More details >
-Install anyway**, or turn the scanner off in Play Store > Play Protect > settings
-while you install.
+### 2. Add the GitHub Actions workflow
 
-On Android 13 and up, sideloaded apps have notification-listener access greyed
-out under a restricted-setting block. To enable SadaPay and JazzCash capture:
-Settings > Apps > Kharcha > **⋮ > Allow restricted settings**, then grant the
-listener under Notifications > Device & app notifications.
+Make sure the project contains this file:
 
-## First run
+```text
+.github/workflows/build-apk.yml
+```
 
-1. Grant SMS permission. The import runs automatically over your whole inbox.
-2. Open **Settings** (the gear beside the month arrows) and scroll to the
-   bottom. The import report tells you what happened.
+Push the workflow to GitHub.
 
-Read the three counters:
+### 3. Download the APK
 
-- `known` is 0 → no sender rule matched. Find the real sender ID in your
-  Messages app and add it under **Senders**. It is often a short code like
-  `8558`, not a name.
-- `known` is healthy but `imported` is low → the wording rules don't fit. Read
-  the "did not parse" samples below the counters.
+Go to your GitHub repository and open:
 
-Then work the loop: copy a failing message into the **Test a message** box,
-read the verdict, add a keyword under **Debit and credit rules**, test again.
-Rescan when the test box goes green.
+**Actions > Build APK > Latest workflow run**
 
-Adding a bank is the same three steps: a sender pattern, whatever debit wording
-it uses, done. No rebuild.
+After the build completes:
 
-## Decisions worth knowing about
+**Artifacts > kharcha-debug**
 
-**Money is `Long` paisa, never `Double`.** Floating point silently loses rupees
-over thousands of transactions.
+Download and unzip the artifact. Inside, you will find the debug APK.
 
-**Deduplication by fingerprint.** A card swipe often fires both an SMS and an app
-notification. `account + direction + amount + minute` hashes to one key and the
-unique index makes the second insert a no-op. This is also why re-importing is
-harmless and runs on every launch.
+Transfer it to your Android phone and install it.
 
-**Transfers are detected, not counted.** A debit paired against a credit of equal
-value in a different account within fifteen minutes is flagged as internal.
-Without it, moving money from HBL to SadaPay reads as spending. Widen the window
-in `detectTransfers` if your transfers settle slowly.
+---
 
-**Categorising is a rule, not a label.** Tapping a transaction writes a
-`merchant -> category` rule and applies it across all history at once.
+## Building a Release APK
 
-**One parser path.** `SmsParser.explain()` makes every decision. The importer,
-the test box and the transaction sheet all call it, so what the test box shows
-is exactly what the importer did — there is no second implementation to drift.
+For testing and personal use, the debug APK is enough:
 
-**Tap any transaction** to see the original message, the sender, and which rule
-fired. That's how you catch a mis-parse, like an amount grabbed from a balance
-figure instead of the charge.
+```bash
+./gradlew assembleDebug
+```
 
-## Not built yet
+For distribution, build a signed release APK:
 
-- Export. There is none, and `allowBackup` is off. Add CSV export before you
-  rely on this.
-- Real Room migrations. The database uses `fallbackToDestructiveMigration`,
-  which is fine while everything rebuilds from SMS in seconds and wrong the
-  moment you keep anything you'd miss.
-- Statement import, for accounts that alert inconsistently. Month totals
-  under-report until every account parses reliably.
-- Cash is a black hole. An ATM withdrawal is one transaction of unknown purpose.
-  Treat the Cash category as a known blind spot rather than trying to fix it.
-- Fonts fall back to system faces. For the intended Bricolage Grotesque and IBM
-  Plex pairing, drop the .ttf files into `res/font/` and edit three lines in
-  `ui/Theme.kt`.
+```bash
+./gradlew assembleRelease
+```
+
+A release build must be signed with a keystore. The final APK is typically located at:
+
+```text
+app/build/outputs/apk/release/app-release.apk
+```
+
+If you plan to publish the app on the Google Play Store, you will usually generate a signed Android App Bundle instead:
+
+```bash
+./gradlew bundleRelease
+```
+
+The generated `.aab` file will be inside:
+
+```text
+app/build/outputs/bundle/release/
+```
+
+## Quick Command
+
+If you just want the fastest way to generate an APK:
+
+```bash
+./gradlew assembleDebug
+```
+
+Then get the APK from:
+
+```text
+app/build/outputs/apk/debug/app-debug.apk
+```
