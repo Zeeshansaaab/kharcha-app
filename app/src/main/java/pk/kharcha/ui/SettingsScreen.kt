@@ -217,7 +217,8 @@ private fun RowItem(label: String, onDelete: () -> Unit) {
         Text(label, color = Ink.Chalk2, fontSize = 13.sp, modifier = Modifier.weight(1f))
         Text(
             "Remove", color = Ink.Clay, fontSize = 12.sp,
-            modifier = Modifier.clickable { onDelete() }.padding(start = 12.dp, vertical = 4.dp)
+            modifier = Modifier.clickable { onDelete() }
+                .padding(start = 12.dp, top = 4.dp, bottom = 4.dp)
         )
     }
 }
