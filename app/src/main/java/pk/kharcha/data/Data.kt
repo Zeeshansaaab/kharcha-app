@@ -15,6 +15,7 @@ data class Txn(
     val timestamp: Long,
     val monthKey: String,
     val account: String,
+    val sender: String,
     val direction: Direction,
     val amountPaisa: Long,
     val merchant: String,
@@ -26,6 +27,7 @@ data class Txn(
     val fingerprint: String
 )
 
+/** merchant substring -> category. Grows as you tap to categorise. */
 @Entity(tableName = "rule")
 data class Rule(
     @PrimaryKey val match: String,
@@ -34,7 +36,7 @@ data class Rule(
 
 /**
  * Maps a sender to an account. `pattern` is a plain lowercase substring, so
- * "8558", "hblpk" and "meezan" all work without regex knowledge.
+ * "8558", "hblpk" and "meezan" all work without any regex knowledge.
  */
 @Entity(tableName = "sender")
 data class SenderRule(
@@ -45,9 +47,8 @@ data class SenderRule(
 
 /**
  * How to recognise a debit or credit. KEYWORD matches a plain phrase anywhere
- * in the message. REGEX is the escape hatch: if it has a capture group, that
- * group is used as the amount instead of the generic amount pattern.
- *
+ * in the message. REGEX is the escape hatch: if the pattern has a capture
+ * group, that group becomes the amount instead of the generic amount pattern.
  * A null account means the rule applies to every bank.
  */
 @Entity(tableName = "parse_rule")
@@ -60,7 +61,7 @@ data class ParseRule(
     val enabled: Boolean = true
 )
 
-/** Phrases that disqualify a message outright — OTPs, balance alerts, promos. */
+/** Phrases that disqualify a message outright: OTPs, balance alerts, promos. */
 @Entity(tableName = "ignore_rule")
 data class IgnoreRule(
     @PrimaryKey val phrase: String,
@@ -73,6 +74,7 @@ data class AccountTotal(val account: String, val totalPaisa: Long)
 @Dao
 interface TxnDao {
 
+    /** IGNORE on conflict is what makes re-running the import safe. */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(txns: List<Txn>): List<Long>
 
@@ -96,6 +98,7 @@ interface TxnDao {
     @Query("SELECT COUNT(*) FROM txn WHERE monthKey = :month AND category IS NULL AND isTransfer = 0")
     fun uncategorisedCount(month: String): Flow<Int>
 
+    /** Applying a rule retroactively is the point of tapping to categorise. */
     @Query("UPDATE txn SET category = :category WHERE lower(rawMerchant) LIKE '%' || :match || '%'")
     suspend fun applyRule(match: String, category: String)
 
@@ -105,7 +108,10 @@ interface TxnDao {
     @Query("SELECT * FROM txn WHERE isTransfer = 0 AND monthKey = :month")
     suspend fun forTransferScan(month: String): List<Txn>
 
-    /** Used before a full rescan: changed rules produce different fingerprints. */
+    @Query("DELETE FROM txn WHERE id = :id")
+    suspend fun delete(id: Long)
+
+    /** Used before a rescan: changed rules produce different fingerprints. */
     @Query("DELETE FROM txn")
     suspend fun deleteAll()
 }
@@ -164,7 +170,7 @@ interface ConfigDao {
 
 @Database(
     entities = [Txn::class, Rule::class, SenderRule::class, ParseRule::class, IgnoreRule::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class Db : RoomDatabase() {
@@ -191,17 +197,16 @@ suspend fun Db.seedIfEmpty() {
         "jazz" to "JazzCash"
     ).forEach { (p, a) -> config().upsertSender(SenderRule(p, a)) }
 
-    val debits = listOf(
+    listOf(
         "debited", "has been debited", "spent", "paid", "payment of",
         "purchase", "withdrawn", "transferred to", "sent to", "deducted"
-    )
-    val credits = listOf(
-        "credited", "has been credited", "received", "deposited", "refund"
-    )
-    debits.forEach {
+    ).forEach {
         config().upsertParseRule(ParseRule(0, null, Direction.DEBIT, MatchType.KEYWORD, it))
     }
-    credits.forEach {
+
+    listOf(
+        "credited", "has been credited", "received", "deposited", "refund"
+    ).forEach {
         config().upsertParseRule(ParseRule(0, null, Direction.CREDIT, MatchType.KEYWORD, it))
     }
 
@@ -211,6 +216,11 @@ suspend fun Db.seedIfEmpty() {
     ).forEach { config().upsertIgnore(IgnoreRule(it)) }
 }
 
+/**
+ * Pairs a debit against a credit of equal value in a different account within
+ * a short window and flags both. Without this, every rupee you move between
+ * your own accounts is counted as spending.
+ */
 suspend fun TxnDao.detectTransfers(month: String, windowMillis: Long = 15 * 60_000L) {
     val txns = forTransferScan(month)
     val debits = txns.filter { it.direction == Direction.DEBIT }

@@ -1,19 +1,22 @@
 package pk.kharcha.parse
 
-import pk.kharcha.data.*
+import pk.kharcha.data.Db
+import pk.kharcha.data.Direction
+import pk.kharcha.data.MatchType
+import pk.kharcha.data.ParseRule
+import pk.kharcha.data.SenderRule
+import pk.kharcha.data.Txn
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** An in-memory snapshot of the rules, so the SMS receiver never touches disk. */
+/** In-memory snapshot of the rules, so the SMS receiver never touches disk. */
 data class ParserConfig(
     val senders: List<SenderRule> = emptyList(),
     val rules: List<ParseRule> = emptyList(),
     val ignores: List<String> = emptyList()
-) {
-    val accounts: List<String> get() = senders.map { it.account }.distinct().sorted()
-}
+)
 
 /** What the parser decided, and why. Drives the test box in Settings. */
 data class Explanation(
@@ -62,12 +65,12 @@ object SmsParser {
     fun parse(sender: String, body: String, timestamp: Long, source: String): Txn? {
         val e = explain(sender, body)
         if (!e.ok) return null
-        val text = clean(body)
 
         return Txn(
             timestamp = timestamp,
             monthKey = monthFmt.format(Date(timestamp)),
             account = e.account,
+            sender = sender,
             direction = e.direction!!,
             amountPaisa = e.amountPaisa!!,
             merchant = normalise(e.merchant),
@@ -75,14 +78,15 @@ object SmsParser {
             category = null,
             isTransfer = false,
             source = source,
-            body = text,
+            body = clean(body),
             fingerprint = fingerprint(e.account, e.direction, e.amountPaisa, timestamp)
         )
     }
 
     /**
-     * The single decision path. parse() and the Settings test box both call
-     * this, so what you see in the test box is exactly what the importer does.
+     * The single decision path. parse(), the import report and the Settings
+     * test box all call this, so what the test box shows is exactly what the
+     * importer does.
      */
     fun explain(sender: String, body: String): Explanation {
         val text = clean(body)
@@ -93,7 +97,9 @@ object SmsParser {
             return Explanation(false, acct, null, null, "", null, "Ignored: matched \"$it\"")
         }
 
-        val applicable = config.rules.filter { it.enabled && (it.account == null || it.account == acct) }
+        val applicable = config.rules.filter {
+            it.enabled && (it.account == null || it.account == acct)
+        }
         if (applicable.isEmpty()) {
             return Explanation(false, acct, null, null, "", null, "No parse rules apply to $acct")
         }
@@ -102,6 +108,7 @@ object SmsParser {
             val amount = when (rule.type) {
                 MatchType.KEYWORD ->
                     if (rule.value.lowercase() in lower) genericAmount(text) else null
+
                 MatchType.REGEX -> runCatching {
                     val m = rule.value.toRegex(
                         setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
@@ -140,6 +147,7 @@ object SmsParser {
             m.groupValues.drop(1).firstOrNull { it.isNotEmpty() }?.let { toPaisa(it) }
         }
 
+    /** Integer paisa, never Double: float rounding loses rupees over time. */
     private fun toPaisa(raw: String): Long? = runCatching {
         val parts = raw.replace(",", "").trim().split(".")
         val rupees = parts[0].toLong()
@@ -153,12 +161,17 @@ object SmsParser {
         MERCHANT.firstNotNullOfOrNull { it.find(text) }?.groupValues?.get(1)
             ?.trim(' ', '.', ',', '-') ?: ""
 
+    /** Strips card suffixes so "K-ELECTRIC*4471" groups with "K-ELECTRIC". */
     private fun normalise(raw: String) = raw
         .replace(Regex("""[*#]\d{3,}"""), "")
         .replace(Regex("""\s+"""), " ")
         .trim()
         .lowercase()
 
+    /**
+     * Same account, amount, direction and minute = one event. Collapses the
+     * SMS/notification double-fire and makes re-importing a no-op.
+     */
     private fun fingerprint(account: String, dir: Direction, paisa: Long, ts: Long): String {
         val minute = ts / 60_000
         return MessageDigest.getInstance("SHA-256")

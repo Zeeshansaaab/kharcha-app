@@ -1,7 +1,5 @@
 package pk.kharcha
 
-package pk.kharcha
-
 import android.Manifest
 import android.app.Application
 import android.content.pm.PackageManager
@@ -12,7 +10,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
@@ -100,11 +102,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         cursor.value = (cursor.value.clone() as Calendar).apply { add(Calendar.MONTH, delta) }
     }
 
+    /** One tap categorises every past and future charge from this merchant. */
     fun categorise(txn: Txn, category: String) = viewModelScope.launch {
         val match = txn.merchant.ifBlank { txn.rawMerchant.lowercase() }
         if (match.isBlank()) return@launch
         db.rules().upsert(Rule(match, category))
         db.txns().applyRule(match, category)
+    }
+
+    fun deleteTxn(txn: Txn) = viewModelScope.launch { db.txns().delete(txn.id) }
+
+    /** Re-runs the parser on the stored message so the sheet can show what fired. */
+    fun explainFor(txn: Txn): String {
+        val e = SmsParser.explain(txn.sender, txn.body)
+        return e.firedRule?.let { "Matched: $it" } ?: e.reason
     }
 
     /** Idempotent, so it runs on every launch rather than only after a grant. */
@@ -155,9 +166,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Draw behind the system bars deliberately, then pay for it with
-        // explicit inset padding below. The default was drawing behind them
-        // without paying, which is why the header sat under the clock.
+        // Draw behind the system bars deliberately, then pay for it with the
+        // inset padding below. The default drew behind them without paying,
+        // which put the header under the clock.
         enableEdgeToEdge()
 
         setContent {
@@ -190,8 +201,8 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                // One inset barrier for the whole app. Screens below can assume
-                // their 0,0 is the first usable pixel.
+                // One inset barrier for the whole app, so every screen below
+                // can assume its 0,0 is the first usable pixel.
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -230,7 +241,9 @@ class MainActivity : ComponentActivity() {
                     CategoriseSheet(
                         txn = txn,
                         categories = DefaultCategories,
+                        explanation = vm.explainFor(txn),
                         onPick = { vm.categorise(txn, it); sheetFor = null },
+                        onDelete = { vm.deleteTxn(txn); sheetFor = null },
                         onDismiss = { sheetFor = null }
                     )
                 }
@@ -240,7 +253,7 @@ class MainActivity : ComponentActivity() {
 }
 
 /**
- * The import counters plus the messages that didn't parse. A zero result should
+ * Import counters plus the messages that didn't parse. A zero result should
  * always say why, rather than leaving you staring at an empty month.
  */
 private fun importSummary(report: ImportReport?, importing: Boolean): String = when {
@@ -250,12 +263,13 @@ private fun importSummary(report: ImportReport?, importing: Boolean): String = w
     else -> buildString {
         appendLine("inbox      ${report.inboxTotal}")
         appendLine("known      ${report.knownSender}")
-        appendLine("imported   ${report.imported}")
+        append("imported   ${report.imported}")
 
         if (report.senders.isNotEmpty()) {
             appendLine()
+            appendLine()
             appendLine("senders matched")
-            report.senders.forEach { (s, n) -> appendLine("  $s  ×$n") }
+            report.senders.forEach { (s, n) -> appendLine("  $s  x$n") }
         }
         if (report.samples.isNotEmpty()) {
             appendLine()

@@ -14,7 +14,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import pk.kharcha.data.*
+import pk.kharcha.data.Direction
+import pk.kharcha.data.IgnoreRule
+import pk.kharcha.data.MatchType
+import pk.kharcha.data.ParseRule
+import pk.kharcha.data.SenderRule
 import pk.kharcha.parse.Explanation
 
 @Composable
@@ -38,18 +42,26 @@ fun SettingsScreen(
     Column(
         Modifier.fillMaxSize().background(Ink.Ground)
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 18.dp).padding(bottom = 40.dp)
+            .imePadding()
+            .padding(horizontal = 18.dp).padding(bottom = 48.dp)
     ) {
-        Row(Modifier.fillMaxWidth().padding(vertical = 20.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            Text("‹", color = Ink.Faint, fontSize = 22.sp,
-                modifier = Modifier.clickable { onBack() }.padding(end = 14.dp))
+        Row(
+            Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 20.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                Modifier.size(44.dp).clip(RoundedCornerShape(999.dp)).clickable { onBack() },
+                contentAlignment = Alignment.Center
+            ) { Text("‹", color = Ink.Faint, fontSize = 20.sp) }
+            Spacer(Modifier.width(4.dp))
             Text("Settings", style = MaterialTheme.typography.titleLarge, color = Ink.Chalk)
         }
 
-        // The test box comes first because it is how you build every rule below:
-        // paste a real message, see the verdict, fix the rule, paste again.
+        // The test box comes first because it is how you build every rule
+        // below: paste a real message, read the verdict, fix, paste again.
         SectionLabel("Test a message")
+        Hint("Paste a real alert and see exactly what the parser decides.")
+
         var testSender by remember { mutableStateOf("") }
         var testBody by remember { mutableStateOf("") }
 
@@ -71,7 +83,7 @@ fun SettingsScreen(
                 )
                 Spacer(Modifier.height(8.dp))
                 Kv("Account", r.account)
-                r.direction?.let { Kv("Direction", it.name) }
+                r.direction?.let { Kv("Direction", it.name.lowercase()) }
                 r.amountPaisa?.let { Kv("Amount", it.asRupees()) }
                 if (r.merchant.isNotBlank()) Kv("Merchant", r.merchant)
                 r.firedRule?.let { Kv("Rule", it) }
@@ -80,13 +92,10 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(30.dp))
         SectionLabel("Senders")
         Hint("Match a sender ID or short code to an account. Plain text, not a pattern — \"8558\" or \"hblpk\".")
-
-        senders.forEach { s ->
-            RowItem("${s.pattern}  →  ${s.account}") { onDeleteSender(s) }
-        }
+        senders.forEach { s -> RowItem("${s.pattern}  →  ${s.account}") { onDeleteSender(s) } }
 
         var newPattern by remember { mutableStateOf("") }
         var newAccount by remember { mutableStateOf("") }
@@ -95,7 +104,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(8.dp))
         Field(newAccount, { newAccount = it }, "Account name, e.g. Bank Alfalah")
         if (accounts.isNotEmpty()) {
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(10.dp))
             Chips(accounts) { newAccount = it }
         }
         Spacer(Modifier.height(10.dp))
@@ -106,10 +115,9 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(30.dp))
         SectionLabel("Debit and credit rules")
         Hint("A keyword matches anywhere in the message. Use regex when a keyword isn't enough — the first capture group becomes the amount.")
-
         rules.forEach { r ->
             val scope = r.account ?: "all accounts"
             RowItem("${r.direction.name.lowercase()} · $scope · ${r.value}") { onDeleteRule(r) }
@@ -145,7 +153,7 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(30.dp))
         SectionLabel("Ignore these")
         Hint("Messages containing any of these are skipped entirely.")
         ignores.forEach { i -> RowItem(i.phrase) { onDeleteIgnore(i) } }
@@ -155,18 +163,28 @@ fun SettingsScreen(
         Field(newIgnore, { newIgnore = it }, "Phrase to ignore")
         Spacer(Modifier.height(10.dp))
         Action("Add phrase") {
-            if (newIgnore.isNotBlank()) { onAddIgnore(newIgnore.trim().lowercase()); newIgnore = "" }
+            if (newIgnore.isNotBlank()) {
+                onAddIgnore(newIgnore.trim().lowercase()); newIgnore = ""
+            }
         }
 
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(30.dp))
         SectionLabel("Rescan")
         Hint("Clears imported transactions and reads the inbox again with the current rules. Your categories are kept and reapplied.")
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(4.dp))
         Action("Clear and rescan inbox", accent = true) { onRescan() }
+
         if (importSummary.isNotBlank()) {
-            Spacer(Modifier.height(12.dp))
-            Text(importSummary, color = Ink.Muted, fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace)
+            Spacer(Modifier.height(14.dp))
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                    .background(Ink.Sunk).padding(13.dp)
+            ) {
+                Text(
+                    importSummary, color = Ink.Muted, fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace, lineHeight = 17.sp
+                )
+            }
         }
     }
 }
@@ -197,8 +215,10 @@ private fun RowItem(label: String, onDelete: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(label, color = Ink.Chalk2, fontSize = 13.sp, modifier = Modifier.weight(1f))
-        Text("Remove", color = Ink.Clay, fontSize = 12.sp,
-            modifier = Modifier.clickable { onDelete() }.padding(start = 12.dp))
+        Text(
+            "Remove", color = Ink.Clay, fontSize = 12.sp,
+            modifier = Modifier.clickable { onDelete() }.padding(start = 12.dp, vertical = 4.dp)
+        )
     }
 }
 
@@ -228,7 +248,7 @@ private fun Action(label: String, accent: Boolean = false, onClick: () -> Unit) 
         Modifier.clip(RoundedCornerShape(999.dp))
             .background(if (accent) Ink.Marigold else Ink.Surface)
             .clickable { onClick() }
-            .padding(horizontal = 18.dp, vertical = 10.dp)
+            .padding(horizontal = 18.dp, vertical = 11.dp)
     ) {
         Text(label, color = if (accent) Ink.Sunk else Ink.Chalk, fontSize = 13.sp)
     }
@@ -240,7 +260,7 @@ private fun Toggle(label: String, on: Boolean, onClick: () -> Unit) {
         Modifier.clip(RoundedCornerShape(999.dp))
             .background(if (on) Ink.Marigold.copy(alpha = 0.2f) else Ink.Surface)
             .clickable { onClick() }
-            .padding(horizontal = 14.dp, vertical = 8.dp)
+            .padding(horizontal = 14.dp, vertical = 9.dp)
     ) {
         Text(label, color = if (on) Ink.Marigold else Ink.Faint, fontSize = 12.sp)
     }
@@ -248,19 +268,16 @@ private fun Toggle(label: String, on: Boolean, onClick: () -> Unit) {
 
 @Composable
 private fun Chips(items: List<String>, onPick: (String) -> Unit) {
-    // Wraps instead of scrolling — with a handful of accounts a horizontal
-    // scroller just hides options off the right edge.
-    Column(Modifier.fillMaxWidth()) {
-        items.chunked(3).forEach { row ->
-            Row(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-                row.forEach {
-                    Box(
-                        Modifier.padding(end = 8.dp).clip(RoundedCornerShape(999.dp))
-                            .background(Ink.Surface).clickable { onPick(it) }
-                            .padding(horizontal = 12.dp, vertical = 7.dp)
-                    ) { Text(it, color = Ink.Muted, fontSize = 12.sp) }
-                }
-            }
+    // Wraps rather than scrolling — a horizontal scroller would hide accounts
+    // off the right edge with no hint they were there.
+    FlowRowCompat(Modifier.fillMaxWidth()) {
+        items.forEach {
+            Box(
+                Modifier.padding(end = 8.dp, bottom = 8.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Ink.Surface).clickable { onPick(it) }
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            ) { Text(it, color = Ink.Muted, fontSize = 12.sp) }
         }
     }
 }

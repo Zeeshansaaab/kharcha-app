@@ -1,6 +1,5 @@
 package pk.kharcha.ui
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -31,7 +30,7 @@ object Ink {
     val Slate = Color(0xFF35494C)
 }
 
-/** Category colours are assigned by hash so a new category never lands colourless. */
+/** Assigned by hash, so a category you invent never lands colourless. */
 val CategoryColors = listOf(Ink.Marigold, Ink.Jade, Ink.Clay, Ink.Faint, Ink.Slate)
 
 fun colorFor(category: String?): Color =
@@ -39,16 +38,16 @@ fun colorFor(category: String?): Color =
     else CategoryColors[(category.hashCode().let { if (it < 0) -it else it }) % CategoryColors.size]
 
 // System faces, so the project builds with no font configuration at all.
-// To get the intended Bricolage Grotesque / IBM Plex pairing, drop the .ttf
-// files into res/font/ and swap these three lines for FontFamily(Font(R.font.x)).
+// For the intended Bricolage Grotesque / IBM Plex pairing, drop the .ttf files
+// into res/font/ and swap these for FontFamily(Font(R.font.name)).
 private val display = FontFamily.SansSerif
 private val body = FontFamily.SansSerif
 
-// Monospace for every rupee figure so columns of numbers align down the screen.
+/** Monospace for every rupee figure, so columns of numbers align. */
 val Numeral = FontFamily.Monospace
 
 private val typography = Typography(
-    displayLarge = TextStyle(fontFamily = Numeral, fontSize = 40.sp, letterSpacing = (-1.5).sp),
+    displayLarge = TextStyle(fontFamily = Numeral, fontSize = 38.sp, letterSpacing = (-1.5).sp),
     titleLarge = TextStyle(fontFamily = display, fontSize = 22.sp, letterSpacing = (-0.2).sp),
     titleMedium = TextStyle(fontFamily = display, fontSize = 16.sp),
     bodyLarge = TextStyle(fontFamily = body, fontSize = 15.sp),
@@ -70,12 +69,9 @@ private val scheme = darkColorScheme(
 
 @Composable
 fun KharchaTheme(content: @Composable () -> Unit) {
-    // Single dark scheme by design; isSystemInDarkTheme is read so the
-    // status bar contrast can be set correctly by the host activity.
-    isSystemInDarkTheme()
     MaterialTheme(colorScheme = scheme, typography = typography, content = content)
 }
 
-/** 1234567L paisa -> "12,345". Rupees only; paisa are noise at this scale. */
+/** 1234567 paisa -> "12,345". Rupees only; paisa are noise at this scale. */
 fun Long.asRupees(): String =
     java.text.NumberFormat.getIntegerInstance(java.util.Locale("en", "PK")).format(this / 100)

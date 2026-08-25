@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -18,8 +18,6 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # The runner image ships the Android SDK; this just puts it on PATH
-      # and accepts the licences non-interactively.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
@@ -31,9 +29,6 @@ jobs:
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
 
-      # Download this from the run's Artifacts section, then sideload it.
-      # Debug builds are signed with the standard debug key, which is fine
-      # for your own device and useless for distribution.
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -41,8 +36,6 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
-      # Compile errors are the expected failure mode on a first run.
-      # This keeps the full Gradle report so you can read what broke.
       - name: Upload build reports on failure
         if: failure()
         uses: actions/upload-artifact@v4

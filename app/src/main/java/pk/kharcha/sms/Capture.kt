@@ -17,10 +17,12 @@ import pk.kharcha.data.detectTransfers
 import pk.kharcha.data.seedIfEmpty
 import pk.kharcha.parse.SmsParser
 
+/** Live capture. Declared in the manifest, so it fires while the app is closed. */
 class SmsReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return
 
+        // A long alert arrives as several parts; join them before parsing.
         val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent) ?: return
         val sender = messages.first().originatingAddress ?: return
         val body = messages.joinToString("") { it.messageBody.orEmpty() }
@@ -36,8 +38,7 @@ class SmsReceiver : BroadcastReceiver() {
                 db.seedIfEmpty()
                 SmsParser.reload(db)
 
-                val txn = SmsParser.parse(sender, body, ts, source = "sms")
-                    ?: return@launch
+                val txn = SmsParser.parse(sender, body, ts, source = "sms") ?: return@launch
                 db.txns().insertAll(listOf(txn))
                 db.txns().detectTransfers(txn.monthKey)
             } finally {
@@ -47,6 +48,10 @@ class SmsReceiver : BroadcastReceiver() {
     }
 }
 
+/**
+ * SadaPay and JazzCash are notification-first and don't reliably SMS every
+ * transaction. Duplicates against SMS are collapsed by the fingerprint.
+ */
 class TxnNotificationListener : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -61,7 +66,7 @@ class TxnNotificationListener : NotificationListenerService() {
             db.seedIfEmpty()
             SmsParser.reload(db)
 
-            // Package name is the sender here, so a sender rule of
+            // The package name is the sender here, so a sender rule of
             // "com.sadapay" or just "sadapay" matches it.
             if (!SmsParser.isKnownSender(sbn.packageName)) return@launch
 
@@ -81,19 +86,14 @@ data class ImportReport(
     val senders: List<Pair<String, Int>> = emptyList(),
     val samples: List<String> = emptyList(),
     val error: String? = null
-) {
-    fun summary() = error ?: buildString {
-        appendLine("inbox      $inboxTotal")
-        appendLine("known      $knownSender")
-        append("imported   $imported")
-    }
-}
+)
 
 object Backfill {
 
     /**
-     * Reads the whole inbox with the current rules. Safe to run repeatedly:
-     * fingerprints make re-imports a no-op.
+     * Reads the whole inbox with the current rules. Safe to run on every
+     * launch: fingerprints make re-imports a no-op. Parse a few years of
+     * history in seconds before you've spent a single rupee.
      */
     suspend fun run(resolver: ContentResolver, db: Db): ImportReport {
         db.seedIfEmpty()
@@ -104,7 +104,9 @@ object Backfill {
         val months = mutableSetOf<String>()
         val senderCounts = mutableMapOf<String, Int>()
         val samples = mutableListOf<String>()
-        var total = 0; var known = 0; var imported = 0
+        var total = 0
+        var known = 0
+        var imported = 0
 
         try {
             resolver.query(
@@ -134,14 +136,17 @@ object Backfill {
                         months += txn.monthKey
                     } else if (isKnown && samples.size < 15) {
                         // Keep the ones that got away, with the parser's own
-                        // verdict attached. These are what new rules get built
+                        // verdict attached. These are what new rules are built
                         // against in the Settings test box.
                         val why = SmsParser.explain(sender, body).reason
                         samples += "[$sender · $why]\n" +
                             body.replace(Regex("""\s+"""), " ").take(200)
                     }
 
-                    if (batch.size >= 500) { db.txns().insertAll(batch); batch.clear() }
+                    if (batch.size >= 500) {
+                        db.txns().insertAll(batch)
+                        batch.clear()
+                    }
                 }
             } ?: return ImportReport(
                 error = "Inbox query returned null — SMS permission not granted."
@@ -170,6 +175,7 @@ object Backfill {
         return run(resolver, db)
     }
 
+    /** Re-applies every saved merchant rule across the whole history. */
     suspend fun applyRules(db: Db) {
         db.rules().all().forEach { db.txns().applyRule(it.match, it.category) }
     }
@@ -181,6 +187,8 @@ object Repo {
     fun db(context: Context): Db = instance ?: synchronized(this) {
         instance ?: androidx.room.Room
             .databaseBuilder(context.applicationContext, Db::class.java, "kharcha.db")
+            // Fine while the data is disposable and rebuilt from SMS in seconds.
+            // Replace with real migrations once you keep anything you'd miss.
             .fallbackToDestructiveMigration()
             .build()
             .also { instance = it }

@@ -1,15 +1,16 @@
 # Kharcha
 
-An offline expense tracker for Pakistani bank and wallet SMS. Reads your existing
-inbox, keeps reading new messages, groups spending by month, and learns merchant
-categories from a single tap. Nothing leaves the device — there is no network
-permission in the manifest, and adding one would be a regression.
+An offline expense tracker for Pakistani bank and wallet SMS. Reads your
+existing inbox, keeps reading new messages, groups spending by month, and learns
+merchant categories from a single tap.
 
-## Getting an APK without installing anything
+Nothing leaves the device. There is no `INTERNET` permission in the manifest,
+and adding one would be a regression.
 
-Push this folder to a GitHub repo. The workflow in `.github/workflows/build.yml`
-runs on every push to `main`, builds a debug APK on GitHub's runners, and attaches
-it to the run.
+## Getting an APK
+
+Push this folder to a GitHub repo. The workflow builds a debug APK on GitHub's
+runners and attaches it to the run.
 
 ```
 git init && git add . && git commit -m "Kharcha"
@@ -18,49 +19,38 @@ git push -u origin main
 ```
 
 Then **Actions > Build APK > latest run > Artifacts > kharcha-debug**. Unzip,
-transfer to your phone, allow install from unknown sources, done. The APK is
-signed with the standard debug key — fine for your own device, useless for
-distribution.
+transfer to your phone, install.
 
-If the first run fails, the workflow uploads the Gradle reports as a second
-artifact so you can read the compile errors without a local toolchain. Compile
-errors on the first attempt would not be surprising; this project has never been
-built.
+Play Protect will block it. That's the right call on its part — a sideloaded app
+requesting `READ_SMS` is the signature of a banking trojan. Tap **More details >
+Install anyway**, or turn the scanner off in Play Store > Play Protect > settings
+while you install.
 
-Android Studio is still the better loop once you start tuning the parser, since
-CI round-trips are minutes and a local build is seconds.
+On Android 13 and up, sideloaded apps have notification-listener access greyed
+out under a restricted-setting block. To enable SadaPay and JazzCash capture:
+Settings > Apps > Kharcha > **⋮ > Allow restricted settings**, then grant the
+listener under Notifications > Device & app notifications.
 
-## After install
+## First run
 
-1. Grant SMS permission on first launch. The historical import runs
-   automatically and takes a few seconds for a few thousand messages.
-2. For SadaPay and JazzCash, also enable the listener under
-   **Settings > Notifications > Device & app notifications > Kharcha**. Android
-   gives no in-app way to grant this; send the user to
-   `Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS`.
-3. Fonts fall back to the system faces so the project builds with no font
-   configuration. For the intended pairing, drop Bricolage Grotesque and IBM Plex
-   .ttf files into `res/font/` and edit the three lines in `ui/Theme.kt`.
+1. Grant SMS permission. The import runs automatically over your whole inbox.
+2. Open **Settings** (the gear beside the month arrows) and scroll to the
+   bottom. The import report tells you what happened.
 
-Sideloading your own signed build is fine. Google Play restricts `READ_SMS` to
-default-SMS-handler apps, so this could not be published as-is — only relevant if
-you ever want it on the store.
+Read the three counters:
 
-## Tuning the parser
+- `known` is 0 → no sender rule matched. Find the real sender ID in your
+  Messages app and add it under **Senders**. It is often a short code like
+  `8558`, not a name.
+- `known` is healthy but `imported` is low → the wording rules don't fit. Read
+  the "did not parse" samples below the counters.
 
-This is the part that decides whether the app is useful, and it is the part only
-you can finish, because it depends on how your five institutions word their
-alerts.
+Then work the loop: copy a failing message into the **Test a message** box,
+read the verdict, add a keyword under **Debit and credit rules**, test again.
+Rescan when the test box goes green.
 
-`parse/SmsParser.kt` holds three tables: `ACCOUNTS` maps sender IDs to account
-names, `IGNORE` drops OTPs and marketing, and `DEBIT`/`CREDIT` extract the amount.
-The shipped patterns are generic. Expect roughly half your messages to parse on
-the first run.
-
-Work the loop: add a screen that lists messages where `parse` returned null,
-read twenty of them, widen a pattern, reinstall. Three rounds should get you past
-95%. Keep the real message text in `Txn.body` — it is stored precisely so you can
-re-parse history after improving a pattern without losing anything.
+Adding a bank is the same three steps: a sender pattern, whatever debit wording
+it uses, done. No rebuild.
 
 ## Decisions worth knowing about
 
@@ -68,25 +58,37 @@ re-parse history after improving a pattern without losing anything.
 over thousands of transactions.
 
 **Deduplication by fingerprint.** A card swipe often fires both an SMS and an app
-notification. `account + direction + amount + minute` hashes to one key, and the
-unique index makes the second insert a no-op. This is also why re-running the
-import is harmless.
+notification. `account + direction + amount + minute` hashes to one key and the
+unique index makes the second insert a no-op. This is also why re-importing is
+harmless and runs on every launch.
 
-**Transfers are detected, not counted.** `detectTransfers` pairs a debit against a
-credit of equal value in a different account within fifteen minutes and flags
-both. Without it, moving money from HBL to SadaPay reads as spending. Widen the
-window if your transfers settle slowly.
+**Transfers are detected, not counted.** A debit paired against a credit of equal
+value in a different account within fifteen minutes is flagged as internal.
+Without it, moving money from HBL to SadaPay reads as spending. Widen the window
+in `detectTransfers` if your transfers settle slowly.
 
 **Categorising is a rule, not a label.** Tapping a transaction writes a
-`merchant -> category` rule and applies it across all history at once. A hundred
-rules will cover most of what you spend.
+`merchant -> category` rule and applies it across all history at once.
+
+**One parser path.** `SmsParser.explain()` makes every decision. The importer,
+the test box and the transaction sheet all call it, so what the test box shows
+is exactly what the importer did — there is no second implementation to drift.
+
+**Tap any transaction** to see the original message, the sender, and which rule
+fired. That's how you catch a mis-parse, like an amount grabbed from a balance
+figure instead of the charge.
 
 ## Not built yet
 
-- The unparsed-messages screen described above. Build this first; you need it.
-- Statement import, for accounts that alert inconsistently. The month totals will
-  under-report until every account is reliably parsed.
+- Export. There is none, and `allowBackup` is off. Add CSV export before you
+  rely on this.
+- Real Room migrations. The database uses `fallbackToDestructiveMigration`,
+  which is fine while everything rebuilds from SMS in seconds and wrong the
+  moment you keep anything you'd miss.
+- Statement import, for accounts that alert inconsistently. Month totals
+  under-report until every account parses reliably.
 - Cash is a black hole. An ATM withdrawal is one transaction of unknown purpose.
   Treat the Cash category as a known blind spot rather than trying to fix it.
-- Backup. There is no export yet, and `allowBackup` is off. Add a plain CSV
-  export before you rely on this for anything.
+- Fonts fall back to system faces. For the intended Bricolage Grotesque and IBM
+  Plex pairing, drop the .ttf files into `res/font/` and edit three lines in
+  `ui/Theme.kt`.
