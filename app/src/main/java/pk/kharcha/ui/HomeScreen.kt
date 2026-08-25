@@ -1,5 +1,6 @@
 package pk.kharcha.ui
 
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -20,36 +21,46 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 @Composable
-fun HomeScreen(state: MonthState, onMonthStep: (Int) -> Unit, onCategorise: (Txn) -> Unit) {
+fun HomeScreen(
+    state: MonthState,
+    onMonthStep: (Int) -> Unit,
+    onCategorise: (Txn) -> Unit,
+    onOpenSettings: () -> Unit
+) {
     LazyColumn(
         modifier = Modifier.fillMaxSize().background(Ink.Ground),
-        contentPadding = PaddingValues(bottom = 24.dp)
+        contentPadding = PaddingValues(bottom = 32.dp)
     ) {
-        item { MonthHeader(state, onMonthStep) }
+        item { MonthHeader(state, onMonthStep, onOpenSettings) }
         item { Spine(state.categories, state.totalPaisa) }
         item { Legend(state.categories) }
         item { Accounts(state.accounts, state.accounts.maxOfOrNull { it.totalPaisa } ?: 1L) }
         item { DayHeader(state.uncategorised) }
         items(state.txns, key = { it.id }) { TxnRow(it, onCategorise) }
 
-        if (state.txns.isEmpty()) item { EmptyMonth() }
+        if (state.txns.isEmpty()) item { EmptyMonth(onOpenSettings) }
     }
 }
 
 @Composable
-private fun MonthHeader(state: MonthState, onStep: (Int) -> Unit) {
-    Column(Modifier.padding(start = 18.dp, end = 18.dp, top = 20.dp, bottom = 18.dp)) {
+private fun MonthHeader(state: MonthState, onStep: (Int) -> Unit, onSettings: () -> Unit) {
+    Column(Modifier.padding(start = 18.dp, end = 8.dp, top = 12.dp, bottom = 18.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(state.label, style = MaterialTheme.typography.titleLarge, color = Ink.Chalk)
-            Spacer(Modifier.weight(1f))
-            Text("‹", color = Ink.Faint, modifier = Modifier
-                .clickable { onStep(-1) }.padding(horizontal = 10.dp))
-            Text("›", color = Ink.Faint, modifier = Modifier
-                .clickable { onStep(1) }.padding(horizontal = 6.dp))
+            Text(
+                state.label,
+                style = MaterialTheme.typography.titleLarge,
+                color = Ink.Chalk,
+                modifier = Modifier.weight(1f)
+            )
+            // 44dp touch targets: the old 10dp-padded glyphs were well under
+            // the minimum and awkward to hit one-handed.
+            IconGlyph("‹") { onStep(-1) }
+            IconGlyph("›") { onStep(1) }
+            IconGlyph("⚙", size = 17) { onSettings() }
         }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(16.dp))
         Text("Spent", style = MaterialTheme.typography.labelSmall, color = Ink.Faint)
-        Row(verticalAlignment = Alignment.Bottom) {
+        Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.padding(end = 10.dp)) {
             Text(
                 state.totalPaisa.asRupees(),
                 style = MaterialTheme.typography.displayLarge,
@@ -65,6 +76,16 @@ private fun MonthHeader(state: MonthState, onStep: (Int) -> Unit) {
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun IconGlyph(glyph: String, size: Int = 20, onClick: () -> Unit) {
+    Box(
+        Modifier.size(44.dp).clip(RoundedCornerShape(999.dp)).clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Text(glyph, color = Ink.Faint, fontSize = size.sp)
     }
 }
 
@@ -193,13 +214,28 @@ private fun TxnRow(txn: Txn, onCategorise: (Txn) -> Unit) {
 }
 
 @Composable
-private fun EmptyMonth() {
-    Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("Nothing here for this month",
-            style = MaterialTheme.typography.bodyLarge, color = Ink.Chalk2)
-        Spacer(Modifier.height(6.dp))
-        Text("Step back a month, or import your SMS history from Settings.",
-            style = MaterialTheme.typography.bodyMedium, color = Ink.Faint)
+private fun EmptyMonth(onOpenSettings: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 40.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            "Nothing here for this month",
+            style = MaterialTheme.typography.bodyLarge, color = Ink.Chalk2
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Step back a month, or check which senders and rules are matching.",
+            style = MaterialTheme.typography.bodyMedium, color = Ink.Faint
+        )
+        Spacer(Modifier.height(18.dp))
+        Box(
+            Modifier.clip(RoundedCornerShape(999.dp)).background(Ink.Surface)
+                .clickable { onOpenSettings() }
+                .padding(horizontal = 18.dp, vertical = 10.dp)
+        ) {
+            Text("Open settings", color = Ink.Chalk, style = MaterialTheme.typography.bodyMedium)
+        }
     }
 }
 

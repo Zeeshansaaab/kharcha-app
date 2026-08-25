@@ -1,5 +1,7 @@
 package pk.kharcha
 
+package pk.kharcha
+
 import android.Manifest
 import android.app.Application
 import android.content.pm.PackageManager
@@ -7,17 +9,12 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Text
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -158,6 +155,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Draw behind the system bars deliberately, then pay for it with
+        // explicit inset padding below. The default was drawing behind them
+        // without paying, which is why the header sat under the clock.
+        enableEdgeToEdge()
+
         setContent {
             KharchaTheme {
                 val vm: MainViewModel = viewModel()
@@ -188,39 +190,38 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                when (route) {
-                    Route.SETTINGS -> SettingsScreen(
-                        senders = senders,
-                        rules = parseRules,
-                        ignores = ignores,
-                        accounts = accounts,
-                        testResult = testResult,
-                        importSummary = importSummary(report, importing),
-                        onTest = vm::test,
-                        onAddSender = vm::addSender,
-                        onDeleteSender = vm::deleteSender,
-                        onAddRule = vm::addParseRule,
-                        onDeleteRule = vm::deleteParseRule,
-                        onAddIgnore = vm::addIgnore,
-                        onDeleteIgnore = vm::deleteIgnore,
-                        onRescan = vm::rescan,
-                        onBack = { route = Route.HOME }
-                    )
+                // One inset barrier for the whole app. Screens below can assume
+                // their 0,0 is the first usable pixel.
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(Ink.Ground)
+                        .windowInsetsPadding(WindowInsets.systemBars)
+                ) {
+                    when (route) {
+                        Route.SETTINGS -> SettingsScreen(
+                            senders = senders,
+                            rules = parseRules,
+                            ignores = ignores,
+                            accounts = accounts,
+                            testResult = testResult,
+                            importSummary = importSummary(report, importing),
+                            onTest = vm::test,
+                            onAddSender = vm::addSender,
+                            onDeleteSender = vm::deleteSender,
+                            onAddRule = vm::addParseRule,
+                            onDeleteRule = vm::deleteParseRule,
+                            onAddIgnore = vm::addIgnore,
+                            onDeleteIgnore = vm::deleteIgnore,
+                            onRescan = vm::rescan,
+                            onBack = { route = Route.HOME }
+                        )
 
-                    Route.HOME -> Box(Modifier.fillMaxSize()) {
-                        HomeScreen(
+                        Route.HOME -> HomeScreen(
                             state = state,
                             onMonthStep = vm::stepMonth,
-                            onCategorise = { sheetFor = it }
-                        )
-                        Text(
-                            "Settings",
-                            color = Ink.Faint,
-                            fontSize = 12.sp,
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .clickable { route = Route.SETTINGS }
-                                .padding(16.dp)
+                            onCategorise = { sheetFor = it },
+                            onOpenSettings = { route = Route.SETTINGS }
                         )
                     }
                 }
