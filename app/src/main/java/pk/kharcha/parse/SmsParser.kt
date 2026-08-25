@@ -1,47 +1,48 @@
 package pk.kharcha.parse
 
-import pk.kharcha.data.Direction
-import pk.kharcha.data.Txn
+import pk.kharcha.data.*
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/**
- * Turns a bank alert into a Txn, or null if the message isn't a transaction.
- *
- * The patterns below are starting points. Every bank words its alerts
- * differently and changes them without warning. Use the Unparsed screen in
- * Settings to see what is falling through, then tighten these.
- */
+/** An in-memory snapshot of the rules, so the SMS receiver never touches disk. */
+data class ParserConfig(
+    val senders: List<SenderRule> = emptyList(),
+    val rules: List<ParseRule> = emptyList(),
+    val ignores: List<String> = emptyList()
+) {
+    val accounts: List<String> get() = senders.map { it.account }.distinct().sorted()
+}
+
+/** What the parser decided, and why. Drives the test box in Settings. */
+data class Explanation(
+    val ok: Boolean,
+    val account: String,
+    val direction: Direction?,
+    val amountPaisa: Long?,
+    val merchant: String,
+    val firedRule: String?,
+    val reason: String
+)
+
 object SmsParser {
 
-    private const val AMOUNT =
-        """(?:PKR|Rs\.?)\s*([\d,]+(?:\.\d{1,2})?)|([\d,]+(?:\.\d{1,2})?)\s*(?:PKR|Rs\.?)"""
+    @Volatile
+    var config: ParserConfig = ParserConfig()
+        private set
 
-    private val ACCOUNTS = mapOf(
-        "HBL" to listOf("""\bHBL\b""", "HBLBANK"),
-        "StanChart" to listOf("""\bSCB?\b""", "StanChart", """Standard\s*Chartered"""),
-        "Meezan" to listOf("Meezan", "MEEZANBNK"),
-        "SadaPay" to listOf("SadaPay", """com\.sadapay"""),
-        "JazzCash" to listOf("JazzCash", """com\.techlogix\.mobilink""")
-    ).mapValues { (_, v) -> v.map { it.toRegex(RegexOption.IGNORE_CASE) } }
+    suspend fun reload(db: Db) {
+        config = ParserConfig(
+            senders = db.config().senders(),
+            rules = db.config().parseRules(),
+            ignores = db.config().ignores().map { it.phrase.lowercase() }
+        )
+    }
 
-    private val IGNORE = listOf(
-        """\b(OTP|one[- ]time|verification code|do not share)\b""",
-        """available balance is|balance inquiry|mini statement""",
-        """(promo|offer|discount|cashback offer|\bwin\b)"""
-    ).map { it.toRegex(RegexOption.IGNORE_CASE) }
-
-    private val DEBIT = listOf(
-        """(?:debited|spent|paid|purchase|withdraw\w*|transferred to|sent to).{0,40}?$AMOUNT""",
-        """$AMOUNT.{0,40}?(?:has been debited|was debited|debited from)"""
-    ).map { it.toRegex(setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)) }
-
-    private val CREDIT = listOf(
-        """(?:credited|received|deposit\w*|refund\w*).{0,40}?$AMOUNT""",
-        """$AMOUNT.{0,40}?(?:has been credited|was credited|credited to)"""
-    ).map { it.toRegex(setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)) }
+    private val AMOUNT =
+        """(?:PKR|RS|Rs\.?)\s*([\d,]+(?:\.\d{1,2})?)|([\d,]+(?:\.\d{1,2})?)\s*(?:PKR|RS|Rs\.?)"""
+            .toRegex(RegexOption.IGNORE_CASE)
 
     private val MERCHANT = listOf(
         """(?:at|to|from)\s+([A-Z0-9][A-Za-z0-9 &.\-*']{2,40}?)(?:\s+on\b|\s+for\b|[.,]|$)""",
@@ -50,70 +51,118 @@ object SmsParser {
 
     private val monthFmt = SimpleDateFormat("yyyy-MM", Locale.US)
 
-    fun parse(sender: String, body: String, timestamp: Long, source: String): Txn? {
-        val text = body.replace(Regex("""\s+"""), " ").trim()
-        if (IGNORE.any { it.containsMatchIn(text) }) return null
+    fun account(sender: String): String {
+        val s = sender.lowercase()
+        return config.senders.firstOrNull { it.enabled && it.pattern.lowercase() in s }
+            ?.account ?: "Unknown"
+    }
 
-        val (direction, paisa) = extract(text) ?: return null
-        val raw = merchant(text)
+    fun isKnownSender(sender: String) = account(sender) != "Unknown"
+
+    fun parse(sender: String, body: String, timestamp: Long, source: String): Txn? {
+        val e = explain(sender, body)
+        if (!e.ok) return null
+        val text = clean(body)
 
         return Txn(
             timestamp = timestamp,
             monthKey = monthFmt.format(Date(timestamp)),
-            account = account(sender),
-            direction = direction,
-            amountPaisa = paisa,
-            merchant = normalise(raw),
-            rawMerchant = raw,
+            account = e.account,
+            direction = e.direction!!,
+            amountPaisa = e.amountPaisa!!,
+            merchant = normalise(e.merchant),
+            rawMerchant = e.merchant,
             category = null,
             isTransfer = false,
             source = source,
             body = text,
-            fingerprint = fingerprint(account(sender), direction, paisa, timestamp)
+            fingerprint = fingerprint(e.account, e.direction, e.amountPaisa, timestamp)
         )
     }
 
-    private fun extract(text: String): Pair<Direction, Long>? {
-        DEBIT.firstNotNullOfOrNull { it.find(text) }?.let { return Direction.DEBIT to paisa(it) }
-        CREDIT.firstNotNullOfOrNull { it.find(text) }?.let { return Direction.CREDIT to paisa(it) }
-        return null
+    /**
+     * The single decision path. parse() and the Settings test box both call
+     * this, so what you see in the test box is exactly what the importer does.
+     */
+    fun explain(sender: String, body: String): Explanation {
+        val text = clean(body)
+        val lower = text.lowercase()
+        val acct = account(sender)
+
+        config.ignores.firstOrNull { it in lower }?.let {
+            return Explanation(false, acct, null, null, "", null, "Ignored: matched \"$it\"")
+        }
+
+        val applicable = config.rules.filter { it.enabled && (it.account == null || it.account == acct) }
+        if (applicable.isEmpty()) {
+            return Explanation(false, acct, null, null, "", null, "No parse rules apply to $acct")
+        }
+
+        for (rule in applicable) {
+            val amount = when (rule.type) {
+                MatchType.KEYWORD ->
+                    if (rule.value.lowercase() in lower) genericAmount(text) else null
+                MatchType.REGEX -> runCatching {
+                    val m = rule.value.toRegex(
+                        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
+                    ).find(text)
+                    when {
+                        m == null -> null
+                        m.groupValues.size > 1 && m.groupValues[1].isNotBlank() ->
+                            toPaisa(m.groupValues[1])
+                        else -> genericAmount(text)
+                    }
+                }.getOrNull()
+            } ?: continue
+
+            return Explanation(
+                ok = true,
+                account = acct,
+                direction = rule.direction,
+                amountPaisa = amount,
+                merchant = merchant(text),
+                firedRule = "${rule.direction} · ${rule.type} · ${rule.value}",
+                reason = if (acct == "Unknown")
+                    "Parsed, but no sender rule matched — filed under Unknown"
+                else "Parsed"
+            )
+        }
+
+        val why = if (AMOUNT.containsMatchIn(text))
+            "Found an amount but no matching debit or credit rule"
+        else
+            "No amount found in this message"
+        return Explanation(false, acct, null, null, "", null, why)
     }
 
-    /** Parse to integer paisa so no rupee is ever lost to float rounding. */
-    private fun paisa(m: MatchResult): Long {
-        val raw = m.groupValues.drop(1).first { it.isNotEmpty() }.replace(",", "")
-        val parts = raw.split(".")
+    private fun genericAmount(text: String): Long? =
+        AMOUNT.find(text)?.let { m ->
+            m.groupValues.drop(1).firstOrNull { it.isNotEmpty() }?.let { toPaisa(it) }
+        }
+
+    private fun toPaisa(raw: String): Long? = runCatching {
+        val parts = raw.replace(",", "").trim().split(".")
         val rupees = parts[0].toLong()
         val fraction = parts.getOrNull(1)?.padEnd(2, '0')?.take(2)?.toLong() ?: 0L
-        return rupees * 100 + fraction
-    }
+        rupees * 100 + fraction
+    }.getOrNull()
 
-    private fun account(sender: String) =
-        ACCOUNTS.entries.firstOrNull { (_, pats) -> pats.any { it.containsMatchIn(sender) } }
-            ?.key ?: "Unknown"
+    private fun clean(body: String) = body.replace(Regex("""\s+"""), " ").trim()
 
     private fun merchant(text: String) =
-        MERCHANT.firstNotNullOfOrNull { it.find(text) }?.groupValues?.get(1)?.trim(' ', '.', ',', '-')
-            ?: ""
+        MERCHANT.firstNotNullOfOrNull { it.find(text) }?.groupValues?.get(1)
+            ?.trim(' ', '.', ',', '-') ?: ""
 
-    /** Strips card suffixes and reference numbers so "K-ELECTRIC*4471" groups with "K-ELECTRIC". */
     private fun normalise(raw: String) = raw
         .replace(Regex("""[*#]\d{3,}"""), "")
         .replace(Regex("""\s+"""), " ")
         .trim()
         .lowercase()
 
-    /**
-     * Same account, same amount, same direction, same minute = one event.
-     * A card swipe usually fires both an SMS and an app notification; this
-     * collapses them, and makes the historical backfill re-runnable.
-     */
     private fun fingerprint(account: String, dir: Direction, paisa: Long, ts: Long): String {
         val minute = ts / 60_000
-        val digest = MessageDigest.getInstance("SHA-256")
+        return MessageDigest.getInstance("SHA-256")
             .digest("$account|$dir|$paisa|$minute".toByteArray())
-        return digest.joinToString("") { "%02x".format(it) }.take(24)
+            .joinToString("") { "%02x".format(it) }.take(24)
     }
-
-    fun isKnownSender(sender: String) = account(sender) != "Unknown"
 }

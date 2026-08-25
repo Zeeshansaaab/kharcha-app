@@ -1,0 +1,264 @@
+package pk.kharcha.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import pk.kharcha.data.*
+import pk.kharcha.parse.Explanation
+
+@Composable
+fun SettingsScreen(
+    senders: List<SenderRule>,
+    rules: List<ParseRule>,
+    ignores: List<IgnoreRule>,
+    accounts: List<String>,
+    testResult: Explanation?,
+    importSummary: String,
+    onTest: (String, String) -> Unit,
+    onAddSender: (String, String) -> Unit,
+    onDeleteSender: (SenderRule) -> Unit,
+    onAddRule: (String?, Direction, MatchType, String) -> Unit,
+    onDeleteRule: (ParseRule) -> Unit,
+    onAddIgnore: (String) -> Unit,
+    onDeleteIgnore: (IgnoreRule) -> Unit,
+    onRescan: () -> Unit,
+    onBack: () -> Unit
+) {
+    Column(
+        Modifier.fillMaxSize().background(Ink.Ground)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 18.dp).padding(bottom = 40.dp)
+    ) {
+        Row(Modifier.fillMaxWidth().padding(vertical = 20.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text("‹", color = Ink.Faint, fontSize = 22.sp,
+                modifier = Modifier.clickable { onBack() }.padding(end = 14.dp))
+            Text("Settings", style = MaterialTheme.typography.titleLarge, color = Ink.Chalk)
+        }
+
+        // The test box comes first because it is how you build every rule below:
+        // paste a real message, see the verdict, fix the rule, paste again.
+        SectionLabel("Test a message")
+        var testSender by remember { mutableStateOf("") }
+        var testBody by remember { mutableStateOf("") }
+
+        Field(testSender, { testSender = it }, "Sender, e.g. 8558 or HBLPK")
+        Spacer(Modifier.height(8.dp))
+        Field(testBody, { testBody = it }, "Paste the full SMS text", lines = 4)
+        Spacer(Modifier.height(10.dp))
+        Action("Test") { onTest(testSender, testBody) }
+
+        testResult?.let { r ->
+            Spacer(Modifier.height(12.dp))
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                    .background(Ink.Surface).padding(14.dp)
+            ) {
+                Text(
+                    if (r.ok) "Parsed" else "Not parsed",
+                    color = if (r.ok) Ink.Jade else Ink.Clay, fontSize = 14.sp
+                )
+                Spacer(Modifier.height(8.dp))
+                Kv("Account", r.account)
+                r.direction?.let { Kv("Direction", it.name) }
+                r.amountPaisa?.let { Kv("Amount", it.asRupees()) }
+                if (r.merchant.isNotBlank()) Kv("Merchant", r.merchant)
+                r.firedRule?.let { Kv("Rule", it) }
+                Spacer(Modifier.height(6.dp))
+                Text(r.reason, color = Ink.Muted, fontSize = 12.sp)
+            }
+        }
+
+        Spacer(Modifier.height(28.dp))
+        SectionLabel("Senders")
+        Hint("Match a sender ID or short code to an account. Plain text, not a pattern — \"8558\" or \"hblpk\".")
+
+        senders.forEach { s ->
+            RowItem("${s.pattern}  →  ${s.account}") { onDeleteSender(s) }
+        }
+
+        var newPattern by remember { mutableStateOf("") }
+        var newAccount by remember { mutableStateOf("") }
+        Spacer(Modifier.height(10.dp))
+        Field(newPattern, { newPattern = it }, "Sender text or number")
+        Spacer(Modifier.height(8.dp))
+        Field(newAccount, { newAccount = it }, "Account name, e.g. Bank Alfalah")
+        if (accounts.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Chips(accounts) { newAccount = it }
+        }
+        Spacer(Modifier.height(10.dp))
+        Action("Add sender") {
+            if (newPattern.isNotBlank() && newAccount.isNotBlank()) {
+                onAddSender(newPattern.trim().lowercase(), newAccount.trim())
+                newPattern = ""; newAccount = ""
+            }
+        }
+
+        Spacer(Modifier.height(28.dp))
+        SectionLabel("Debit and credit rules")
+        Hint("A keyword matches anywhere in the message. Use regex when a keyword isn't enough — the first capture group becomes the amount.")
+
+        rules.forEach { r ->
+            val scope = r.account ?: "all accounts"
+            RowItem("${r.direction.name.lowercase()} · $scope · ${r.value}") { onDeleteRule(r) }
+        }
+
+        var ruleValue by remember { mutableStateOf("") }
+        var ruleAccount by remember { mutableStateOf("") }
+        var ruleDebit by remember { mutableStateOf(true) }
+        var ruleRegex by remember { mutableStateOf(false) }
+
+        Spacer(Modifier.height(10.dp))
+        Field(ruleValue, { ruleValue = it }, "Keyword or regex")
+        Spacer(Modifier.height(8.dp))
+        Field(ruleAccount, { ruleAccount = it }, "Account, or blank for all")
+        Spacer(Modifier.height(10.dp))
+        Row {
+            Toggle("Debit", ruleDebit) { ruleDebit = true }
+            Spacer(Modifier.width(8.dp))
+            Toggle("Credit", !ruleDebit) { ruleDebit = false }
+            Spacer(Modifier.width(16.dp))
+            Toggle("Regex", ruleRegex) { ruleRegex = !ruleRegex }
+        }
+        Spacer(Modifier.height(10.dp))
+        Action("Add rule") {
+            if (ruleValue.isNotBlank()) {
+                onAddRule(
+                    ruleAccount.trim().ifBlank { null },
+                    if (ruleDebit) Direction.DEBIT else Direction.CREDIT,
+                    if (ruleRegex) MatchType.REGEX else MatchType.KEYWORD,
+                    ruleValue.trim()
+                )
+                ruleValue = ""
+            }
+        }
+
+        Spacer(Modifier.height(28.dp))
+        SectionLabel("Ignore these")
+        Hint("Messages containing any of these are skipped entirely.")
+        ignores.forEach { i -> RowItem(i.phrase) { onDeleteIgnore(i) } }
+
+        var newIgnore by remember { mutableStateOf("") }
+        Spacer(Modifier.height(10.dp))
+        Field(newIgnore, { newIgnore = it }, "Phrase to ignore")
+        Spacer(Modifier.height(10.dp))
+        Action("Add phrase") {
+            if (newIgnore.isNotBlank()) { onAddIgnore(newIgnore.trim().lowercase()); newIgnore = "" }
+        }
+
+        Spacer(Modifier.height(28.dp))
+        SectionLabel("Rescan")
+        Hint("Clears imported transactions and reads the inbox again with the current rules. Your categories are kept and reapplied.")
+        Spacer(Modifier.height(10.dp))
+        Action("Clear and rescan inbox", accent = true) { onRescan() }
+        if (importSummary.isNotBlank()) {
+            Spacer(Modifier.height(12.dp))
+            Text(importSummary, color = Ink.Muted, fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace)
+        }
+    }
+}
+
+@Composable
+private fun SectionLabel(t: String) {
+    Text(t, style = MaterialTheme.typography.labelSmall, color = Ink.Faint)
+    Spacer(Modifier.height(6.dp))
+}
+
+@Composable
+private fun Hint(t: String) {
+    Text(t, color = Ink.Ghost, fontSize = 12.sp, modifier = Modifier.padding(bottom = 12.dp))
+}
+
+@Composable
+private fun Kv(k: String, v: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Text(k, color = Ink.Faint, fontSize = 12.sp, modifier = Modifier.width(88.dp))
+        Text(v, color = Ink.Chalk, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+    }
+}
+
+@Composable
+private fun RowItem(label: String, onDelete: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, color = Ink.Chalk2, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        Text("Remove", color = Ink.Clay, fontSize = 12.sp,
+            modifier = Modifier.clickable { onDelete() }.padding(start = 12.dp))
+    }
+}
+
+@Composable
+private fun Field(value: String, onChange: (String) -> Unit, hint: String, lines: Int = 1) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        placeholder = { Text(hint, color = Ink.Ghost, fontSize = 13.sp) },
+        singleLine = lines == 1,
+        minLines = lines,
+        textStyle = MaterialTheme.typography.bodyLarge,
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = Ink.Chalk,
+            unfocusedTextColor = Ink.Chalk,
+            focusedBorderColor = Ink.Marigold,
+            unfocusedBorderColor = Ink.LineStrong,
+            cursorColor = Ink.Marigold
+        ),
+        modifier = Modifier.fillMaxWidth()
+    )
+}
+
+@Composable
+private fun Action(label: String, accent: Boolean = false, onClick: () -> Unit) {
+    Box(
+        Modifier.clip(RoundedCornerShape(999.dp))
+            .background(if (accent) Ink.Marigold else Ink.Surface)
+            .clickable { onClick() }
+            .padding(horizontal = 18.dp, vertical = 10.dp)
+    ) {
+        Text(label, color = if (accent) Ink.Sunk else Ink.Chalk, fontSize = 13.sp)
+    }
+}
+
+@Composable
+private fun Toggle(label: String, on: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.clip(RoundedCornerShape(999.dp))
+            .background(if (on) Ink.Marigold.copy(alpha = 0.2f) else Ink.Surface)
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 8.dp)
+    ) {
+        Text(label, color = if (on) Ink.Marigold else Ink.Faint, fontSize = 12.sp)
+    }
+}
+
+@Composable
+private fun Chips(items: List<String>, onPick: (String) -> Unit) {
+    Row(Modifier.fillMaxWidth().horizontalScrollCompat()) {
+        items.forEach {
+            Box(
+                Modifier.padding(end = 8.dp).clip(RoundedCornerShape(999.dp))
+                    .background(Ink.Surface).clickable { onPick(it) }
+                    .padding(horizontal = 12.dp, vertical = 7.dp)
+            ) { Text(it, color = Ink.Muted, fontSize = 12.sp) }
+        }
+    }
+}
+
+@Composable
+private fun Modifier.horizontalScrollCompat(): Modifier =
+    this.then(Modifier.horizontalScroll(rememberScrollState()))
