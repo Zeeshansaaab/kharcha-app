@@ -1,12 +1,21 @@
 package pk.kharcha.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 // Deep jade ground with a marigold accent. Local vernacular rather than
@@ -28,6 +37,23 @@ object Ink {
     val Jade = Color(0xFF2C8C72)
     val Clay = Color(0xFFC2543C)
     val Slate = Color(0xFF35494C)
+}
+
+/**
+ * Shared card shell. Every grouped block on Home and Settings sits on one of
+ * these, so sections read as distinct chunks instead of bleeding into the
+ * bare background.
+ */
+@Composable
+fun SectionCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(Ink.Surface)
+            .padding(16.dp),
+        content = content
+    )
 }
 
 /** Assigned by hash, so a category you invent never lands colourless. */

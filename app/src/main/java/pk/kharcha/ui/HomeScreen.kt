@@ -4,7 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -37,11 +37,35 @@ fun HomeScreen(
         contentPadding = PaddingValues(bottom = 32.dp)
     ) {
         item { MonthHeader(state, onMonthStep, onOpenSettings) }
-        item { Spine(state.categories, state.totalPaisa) }
-        item { Legend(state.categories) }
-        item { Accounts(state.accounts, state.accounts.maxOfOrNull { it.totalPaisa } ?: 1L) }
+
+        if (state.totalPaisa > 0L) {
+            item {
+                SectionCard(Modifier.padding(horizontal = 18.dp, vertical = 6.dp)) {
+                    Spine(state.categories, state.totalPaisa)
+                    Legend(state.categories)
+                }
+            }
+        }
+
+        if (state.accounts.isNotEmpty()) {
+            item {
+                SectionCard(Modifier.padding(horizontal = 18.dp, vertical = 6.dp)) {
+                    Accounts(state.accounts, state.accounts.maxOfOrNull { it.totalPaisa } ?: 1L)
+                }
+            }
+        }
+
         item { DayHeader(state.uncategorised) }
-        items(state.txns, key = { it.id }) { TxnRow(it, onCategorise) }
+
+        itemsIndexed(state.txns, key = { _, t -> t.id }) { index, txn ->
+            TxnRow(txn, onCategorise)
+            if (index < state.txns.lastIndex) {
+                HorizontalDivider(
+                    color = Ink.Line, thickness = 1.dp,
+                    modifier = Modifier.padding(start = 67.dp, end = 18.dp)
+                )
+            }
+        }
 
         if (state.txns.isEmpty()) item { EmptyMonth(onOpenSettings) }
     }
@@ -49,7 +73,7 @@ fun HomeScreen(
 
 @Composable
 private fun MonthHeader(state: MonthState, onStep: (Int) -> Unit, onSettings: () -> Unit) {
-    Column(Modifier.padding(start = 18.dp, end = 8.dp, top = 12.dp, bottom = 18.dp)) {
+    Column(Modifier.padding(start = 18.dp, end = 8.dp, top = 16.dp, bottom = 22.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 state.label,
@@ -62,8 +86,9 @@ private fun MonthHeader(state: MonthState, onStep: (Int) -> Unit, onSettings: ()
             IconGlyph("›") { onStep(1) }
             IconGlyph("⚙", size = 17) { onSettings() }
         }
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(20.dp))
         Text("Spent", style = MaterialTheme.typography.labelSmall, color = Ink.Faint)
+        Spacer(Modifier.height(4.dp))
         Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.padding(end = 10.dp)) {
             Text(
                 state.totalPaisa.asRupees(),
@@ -72,14 +97,27 @@ private fun MonthHeader(state: MonthState, onStep: (Int) -> Unit, onSettings: ()
             )
             state.deltaPercent?.let {
                 Spacer(Modifier.width(10.dp))
-                Text(
-                    (if (it >= 0) "+$it%" else "$it%") + " vs " + state.previousLabel,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (it >= 0) Ink.Marigold else Ink.Jade,
-                    modifier = Modifier.padding(bottom = 6.dp)
-                )
+                DeltaPill(it, state.previousLabel)
             }
         }
+    }
+}
+
+@Composable
+private fun DeltaPill(percent: Int, previousLabel: String) {
+    val up = percent >= 0
+    val tone = if (up) Ink.Marigold else Ink.Jade
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(tone.copy(alpha = 0.16f))
+            .padding(horizontal = 10.dp, vertical = 5.dp)
+    ) {
+        Text(
+            (if (up) "+$percent%" else "$percent%") + " vs ${previousLabel}",
+            style = MaterialTheme.typography.bodyMedium,
+            color = tone
+        )
     }
 }
 
@@ -101,7 +139,7 @@ private fun IconGlyph(glyph: String, size: Int = 20, onClick: () -> Unit) {
 private fun Spine(categories: List<CategoryTotal>, total: Long) {
     if (total <= 0L) return
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 18.dp).height(11.dp),
+        Modifier.fillMaxWidth().height(14.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp)
     ) {
         categories.forEach { c ->
@@ -119,7 +157,7 @@ private fun Spine(categories: List<CategoryTotal>, total: Long) {
 @Composable
 private fun Legend(categories: List<CategoryTotal>) {
     if (categories.isEmpty()) return
-    FlowRowCompat(Modifier.padding(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 16.dp)) {
+    FlowRowCompat(Modifier.padding(top = 14.dp)) {
         categories.take(5).forEach { c ->
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -142,9 +180,9 @@ private fun Legend(categories: List<CategoryTotal>) {
 @Composable
 private fun Accounts(accounts: List<AccountTotal>, max: Long) {
     if (accounts.isEmpty()) return
-    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp)) {
+    Column(Modifier.fillMaxWidth()) {
         Text("Accounts", style = MaterialTheme.typography.labelSmall, color = Ink.Faint)
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(12.dp))
         accounts.forEach { a ->
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -177,7 +215,7 @@ private fun Accounts(accounts: List<AccountTotal>, max: Long) {
 @Composable
 private fun DayHeader(uncategorised: Int) {
     Row(
-        Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 8.dp),
+        Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 22.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text("Transactions", style = MaterialTheme.typography.labelSmall, color = Ink.Faint)
@@ -200,14 +238,21 @@ private fun TxnRow(txn: Txn, onCategorise: (Txn) -> Unit) {
     Row(
         Modifier.fillMaxWidth()
             .clickable { onCategorise(txn) }
-            .padding(horizontal = 18.dp, vertical = 9.dp),
+            .padding(horizontal = 18.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
-            Modifier.size(30.dp).clip(RoundedCornerShape(9.dp))
-                .background(if (dimmed) Ink.Surface else colorFor(txn.category).copy(alpha = 0.16f))
-        )
-        Spacer(Modifier.width(11.dp))
+            Modifier.size(36.dp).clip(RoundedCornerShape(11.dp))
+                .background(if (dimmed) Ink.Surface else colorFor(txn.category).copy(alpha = 0.18f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                txn.merchant.ifBlank { txn.rawMerchant }.trim().firstOrNull()?.uppercase() ?: "?",
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (dimmed) Ink.Ghost else colorFor(txn.category)
+            )
+        }
+        Spacer(Modifier.width(13.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 txn.merchant.ifBlank { "Unknown" }.replaceFirstChar { it.uppercase() },
@@ -215,6 +260,7 @@ private fun TxnRow(txn: Txn, onCategorise: (Txn) -> Unit) {
                 color = if (dimmed) Ink.Ghost else Ink.Chalk,
                 textDecoration = if (dimmed) TextDecoration.LineThrough else null
             )
+            Spacer(Modifier.height(2.dp))
             Text(
                 when {
                     dimmed -> "Transfer, not counted"
@@ -225,6 +271,7 @@ private fun TxnRow(txn: Txn, onCategorise: (Txn) -> Unit) {
                 color = if (txn.category == null && !dimmed) Ink.Marigold else Ink.Faint
             )
         }
+        Spacer(Modifier.width(8.dp))
         Text(
             txn.amountPaisa.asRupees(), fontFamily = Numeral,
             style = MaterialTheme.typography.bodyLarge,

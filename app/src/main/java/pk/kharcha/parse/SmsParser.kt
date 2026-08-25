@@ -4,6 +4,7 @@ import pk.kharcha.data.Db
 import pk.kharcha.data.Direction
 import pk.kharcha.data.MatchType
 import pk.kharcha.data.ParseRule
+import pk.kharcha.data.Rule
 import pk.kharcha.data.SenderRule
 import pk.kharcha.data.Txn
 import java.security.MessageDigest
@@ -15,7 +16,8 @@ import java.util.Locale
 data class ParserConfig(
     val senders: List<SenderRule> = emptyList(),
     val rules: List<ParseRule> = emptyList(),
-    val ignores: List<String> = emptyList()
+    val ignores: List<String> = emptyList(),
+    val merchantRules: List<Rule> = emptyList()
 )
 
 /** What the parser decided, and why. Drives the test box in Settings. */
@@ -39,7 +41,8 @@ object SmsParser {
         config = ParserConfig(
             senders = db.config().senders(),
             rules = db.config().parseRules(),
-            ignores = db.config().ignores().map { it.phrase.lowercase() }
+            ignores = db.config().ignores().map { it.phrase.lowercase() },
+            merchantRules = db.rules().all()
         )
     }
 
@@ -75,12 +78,22 @@ object SmsParser {
             amountPaisa = e.amountPaisa!!,
             merchant = normalise(e.merchant),
             rawMerchant = e.merchant,
-            category = null,
+            category = categoryFor(e.merchant),
             isTransfer = false,
             source = source,
             body = clean(body),
             fingerprint = fingerprint(e.account, e.direction, e.amountPaisa, timestamp)
         )
+    }
+
+    /**
+     * Same substring match as TxnDao.applyRule, so a message that matches a
+     * merchant you've already categorised arrives pre-categorised instead of
+     * waiting for the next rescan.
+     */
+    private fun categoryFor(rawMerchant: String): String? {
+        val raw = rawMerchant.lowercase()
+        return config.merchantRules.firstOrNull { it.match in raw }?.category
     }
 
     /**

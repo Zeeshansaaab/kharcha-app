@@ -43,10 +43,11 @@ fun SettingsScreen(
         Modifier.fillMaxSize().background(Ink.Ground)
             .verticalScroll(rememberScrollState())
             .imePadding()
-            .padding(horizontal = 18.dp).padding(bottom = 48.dp)
+            .padding(horizontal = 18.dp).padding(top = 4.dp, bottom = 48.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 20.dp),
+            Modifier.fillMaxWidth().padding(top = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
@@ -59,131 +60,144 @@ fun SettingsScreen(
 
         // The test box comes first because it is how you build every rule
         // below: paste a real message, read the verdict, fix, paste again.
-        SectionLabel("Test a message")
-        Hint("Paste a real alert and see exactly what the parser decides.")
+        SectionCard {
+            SectionLabel("Test a message")
+            Hint("Paste a real alert and see exactly what the parser decides.")
 
-        var testSender by remember { mutableStateOf("") }
-        var testBody by remember { mutableStateOf("") }
+            var testSender by remember { mutableStateOf("") }
+            var testBody by remember { mutableStateOf("") }
 
-        Field(testSender, { testSender = it }, "Sender, e.g. 8558 or HBLPK")
-        Spacer(Modifier.height(8.dp))
-        Field(testBody, { testBody = it }, "Paste the full SMS text", lines = 4)
-        Spacer(Modifier.height(10.dp))
-        Action("Test") { onTest(testSender, testBody) }
-
-        testResult?.let { r ->
-            Spacer(Modifier.height(12.dp))
-            Column(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-                    .background(Ink.Surface).padding(14.dp)
-            ) {
-                Text(
-                    if (r.ok) "Parsed" else "Not parsed",
-                    color = if (r.ok) Ink.Jade else Ink.Clay, fontSize = 14.sp
-                )
-                Spacer(Modifier.height(8.dp))
-                Kv("Account", r.account)
-                r.direction?.let { Kv("Direction", it.name.lowercase()) }
-                r.amountPaisa?.let { Kv("Amount", it.asRupees()) }
-                if (r.merchant.isNotBlank()) Kv("Merchant", r.merchant)
-                r.firedRule?.let { Kv("Rule", it) }
-                Spacer(Modifier.height(6.dp))
-                Text(r.reason, color = Ink.Muted, fontSize = 12.sp)
-            }
-        }
-
-        Spacer(Modifier.height(30.dp))
-        SectionLabel("Senders")
-        Hint("Match a sender ID or short code to an account. Plain text, not a pattern — \"8558\" or \"hblpk\".")
-        senders.forEach { s -> RowItem("${s.pattern}  →  ${s.account}") { onDeleteSender(s) } }
-
-        var newPattern by remember { mutableStateOf("") }
-        var newAccount by remember { mutableStateOf("") }
-        Spacer(Modifier.height(10.dp))
-        Field(newPattern, { newPattern = it }, "Sender text or number")
-        Spacer(Modifier.height(8.dp))
-        Field(newAccount, { newAccount = it }, "Account name, e.g. Bank Alfalah")
-        if (accounts.isNotEmpty()) {
+            Field(testSender, { testSender = it }, "Sender, e.g. 8558 or HBLPK")
+            Spacer(Modifier.height(8.dp))
+            Field(testBody, { testBody = it }, "Paste the full SMS text", lines = 4)
             Spacer(Modifier.height(10.dp))
-            Chips(accounts) { newAccount = it }
-        }
-        Spacer(Modifier.height(10.dp))
-        Action("Add sender") {
-            if (newPattern.isNotBlank() && newAccount.isNotBlank()) {
-                onAddSender(newPattern.trim().lowercase(), newAccount.trim())
-                newPattern = ""; newAccount = ""
+            Action("Test") { onTest(testSender, testBody) }
+
+            testResult?.let { r ->
+                Spacer(Modifier.height(12.dp))
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                        .background(Ink.Sunk).padding(14.dp)
+                ) {
+                    Text(
+                        if (r.ok) "Parsed" else "Not parsed",
+                        color = if (r.ok) Ink.Jade else Ink.Clay, fontSize = 14.sp
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Kv("Account", r.account)
+                    r.direction?.let { Kv("Direction", it.name.lowercase()) }
+                    r.amountPaisa?.let { Kv("Amount", it.asRupees()) }
+                    if (r.merchant.isNotBlank()) Kv("Merchant", r.merchant)
+                    r.firedRule?.let { Kv("Rule", it) }
+                    Spacer(Modifier.height(6.dp))
+                    Text(r.reason, color = Ink.Muted, fontSize = 12.sp)
+                }
             }
         }
 
-        Spacer(Modifier.height(30.dp))
-        SectionLabel("Debit and credit rules")
-        Hint("A keyword matches anywhere in the message. Use regex when a keyword isn't enough — the first capture group becomes the amount.")
-        rules.forEach { r ->
-            val scope = r.account ?: "all accounts"
-            RowItem("${r.direction.name.lowercase()} · $scope · ${r.value}") { onDeleteRule(r) }
-        }
+        SectionCard {
+            SectionLabel("Senders")
+            Hint("Match a sender ID or short code to an account. Plain text, not a pattern — \"8558\" or \"hblpk\".")
+            senders.forEachIndexed { index, s ->
+                RowItem("${s.pattern}  →  ${s.account}") { onDeleteSender(s) }
+                if (index < senders.lastIndex) HorizontalDivider(color = Ink.Line, thickness = 1.dp)
+            }
 
-        var ruleValue by remember { mutableStateOf("") }
-        var ruleAccount by remember { mutableStateOf("") }
-        var ruleDebit by remember { mutableStateOf(true) }
-        var ruleRegex by remember { mutableStateOf(false) }
-
-        Spacer(Modifier.height(10.dp))
-        Field(ruleValue, { ruleValue = it }, "Keyword or regex")
-        Spacer(Modifier.height(8.dp))
-        Field(ruleAccount, { ruleAccount = it }, "Account, or blank for all")
-        Spacer(Modifier.height(10.dp))
-        Row {
-            Toggle("Debit", ruleDebit) { ruleDebit = true }
-            Spacer(Modifier.width(8.dp))
-            Toggle("Credit", !ruleDebit) { ruleDebit = false }
-            Spacer(Modifier.width(16.dp))
-            Toggle("Regex", ruleRegex) { ruleRegex = !ruleRegex }
-        }
-        Spacer(Modifier.height(10.dp))
-        Action("Add rule") {
-            if (ruleValue.isNotBlank()) {
-                onAddRule(
-                    ruleAccount.trim().ifBlank { null },
-                    if (ruleDebit) Direction.DEBIT else Direction.CREDIT,
-                    if (ruleRegex) MatchType.REGEX else MatchType.KEYWORD,
-                    ruleValue.trim()
-                )
-                ruleValue = ""
+            var newPattern by remember { mutableStateOf("") }
+            var newAccount by remember { mutableStateOf("") }
+            Spacer(Modifier.height(10.dp))
+            Field(newPattern, { newPattern = it }, "Sender text or number")
+            Spacer(Modifier.height(8.dp))
+            Field(newAccount, { newAccount = it }, "Account name, e.g. Bank Alfalah")
+            if (accounts.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                Chips(accounts) { newAccount = it }
+            }
+            Spacer(Modifier.height(10.dp))
+            Action("Add sender") {
+                if (newPattern.isNotBlank() && newAccount.isNotBlank()) {
+                    onAddSender(newPattern.trim().lowercase(), newAccount.trim())
+                    newPattern = ""; newAccount = ""
+                }
             }
         }
 
-        Spacer(Modifier.height(30.dp))
-        SectionLabel("Ignore these")
-        Hint("Messages containing any of these are skipped entirely.")
-        ignores.forEach { i -> RowItem(i.phrase) { onDeleteIgnore(i) } }
+        SectionCard {
+            SectionLabel("Debit and credit rules")
+            Hint("A keyword matches anywhere in the message. Use regex when a keyword isn't enough — the first capture group becomes the amount.")
+            rules.forEachIndexed { index, r ->
+                val scope = r.account ?: "all accounts"
+                RowItem("${r.direction.name.lowercase()} · $scope · ${r.value}") { onDeleteRule(r) }
+                if (index < rules.lastIndex) HorizontalDivider(color = Ink.Line, thickness = 1.dp)
+            }
 
-        var newIgnore by remember { mutableStateOf("") }
-        Spacer(Modifier.height(10.dp))
-        Field(newIgnore, { newIgnore = it }, "Phrase to ignore")
-        Spacer(Modifier.height(10.dp))
-        Action("Add phrase") {
-            if (newIgnore.isNotBlank()) {
-                onAddIgnore(newIgnore.trim().lowercase()); newIgnore = ""
+            var ruleValue by remember { mutableStateOf("") }
+            var ruleAccount by remember { mutableStateOf("") }
+            var ruleDebit by remember { mutableStateOf(true) }
+            var ruleRegex by remember { mutableStateOf(false) }
+
+            Spacer(Modifier.height(10.dp))
+            Field(ruleValue, { ruleValue = it }, "Keyword or regex")
+            Spacer(Modifier.height(8.dp))
+            Field(ruleAccount, { ruleAccount = it }, "Account, or blank for all")
+            Spacer(Modifier.height(10.dp))
+            Row {
+                Toggle("Debit", ruleDebit) { ruleDebit = true }
+                Spacer(Modifier.width(8.dp))
+                Toggle("Credit", !ruleDebit) { ruleDebit = false }
+                Spacer(Modifier.width(16.dp))
+                Toggle("Regex", ruleRegex) { ruleRegex = !ruleRegex }
+            }
+            Spacer(Modifier.height(10.dp))
+            Action("Add rule") {
+                if (ruleValue.isNotBlank()) {
+                    onAddRule(
+                        ruleAccount.trim().ifBlank { null },
+                        if (ruleDebit) Direction.DEBIT else Direction.CREDIT,
+                        if (ruleRegex) MatchType.REGEX else MatchType.KEYWORD,
+                        ruleValue.trim()
+                    )
+                    ruleValue = ""
+                }
             }
         }
 
-        Spacer(Modifier.height(30.dp))
-        SectionLabel("Rescan")
-        Hint("Clears imported transactions and reads the inbox again with the current rules. Your categories are kept and reapplied.")
-        Spacer(Modifier.height(4.dp))
-        Action("Clear and rescan inbox", accent = true) { onRescan() }
+        SectionCard {
+            SectionLabel("Ignore these")
+            Hint("Messages containing any of these are skipped entirely.")
+            ignores.forEachIndexed { index, i ->
+                RowItem(i.phrase) { onDeleteIgnore(i) }
+                if (index < ignores.lastIndex) HorizontalDivider(color = Ink.Line, thickness = 1.dp)
+            }
 
-        if (importSummary.isNotBlank()) {
-            Spacer(Modifier.height(14.dp))
-            Column(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-                    .background(Ink.Sunk).padding(13.dp)
-            ) {
-                Text(
-                    importSummary, color = Ink.Muted, fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace, lineHeight = 17.sp
-                )
+            var newIgnore by remember { mutableStateOf("") }
+            Spacer(Modifier.height(10.dp))
+            Field(newIgnore, { newIgnore = it }, "Phrase to ignore")
+            Spacer(Modifier.height(10.dp))
+            Action("Add phrase") {
+                if (newIgnore.isNotBlank()) {
+                    onAddIgnore(newIgnore.trim().lowercase()); newIgnore = ""
+                }
+            }
+        }
+
+        SectionCard {
+            SectionLabel("Rescan")
+            Hint("Clears imported transactions and reads the inbox again with the current rules. Your categories are kept and reapplied.")
+            Spacer(Modifier.height(4.dp))
+            Action("Clear and rescan inbox", accent = true) { onRescan() }
+
+            if (importSummary.isNotBlank()) {
+                Spacer(Modifier.height(14.dp))
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                        .background(Ink.Sunk).padding(13.dp)
+                ) {
+                    Text(
+                        importSummary, color = Ink.Muted, fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace, lineHeight = 17.sp
+                    )
+                }
             }
         }
     }

@@ -108,6 +108,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (match.isBlank()) return@launch
         db.rules().upsert(Rule(match, category))
         db.txns().applyRule(match, category)
+        SmsParser.reload(db)
     }
 
     fun deleteTxn(txn: Txn) = viewModelScope.launch { db.txns().delete(txn.id) }
