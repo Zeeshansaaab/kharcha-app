@@ -248,17 +248,19 @@ private fun Toggle(label: String, on: Boolean, onClick: () -> Unit) {
 
 @Composable
 private fun Chips(items: List<String>, onPick: (String) -> Unit) {
-    Row(Modifier.fillMaxWidth().horizontalScrollCompat()) {
-        items.forEach {
-            Box(
-                Modifier.padding(end = 8.dp).clip(RoundedCornerShape(999.dp))
-                    .background(Ink.Surface).clickable { onPick(it) }
-                    .padding(horizontal = 12.dp, vertical = 7.dp)
-            ) { Text(it, color = Ink.Muted, fontSize = 12.sp) }
+    // Wraps instead of scrolling — with a handful of accounts a horizontal
+    // scroller just hides options off the right edge.
+    Column(Modifier.fillMaxWidth()) {
+        items.chunked(3).forEach { row ->
+            Row(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                row.forEach {
+                    Box(
+                        Modifier.padding(end = 8.dp).clip(RoundedCornerShape(999.dp))
+                            .background(Ink.Surface).clickable { onPick(it) }
+                            .padding(horizontal = 12.dp, vertical = 7.dp)
+                    ) { Text(it, color = Ink.Muted, fontSize = 12.sp) }
+                }
+            }
         }
     }
 }
-
-@Composable
-private fun Modifier.horizontalScrollCompat(): Modifier =
-    this.then(Modifier.horizontalScroll(rememberScrollState()))
