@@ -68,6 +68,17 @@ data class IgnoreRule(
     val enabled: Boolean = true
 )
 
+/**
+ * A symbol or code the parser looks for next to a number to recognise it as
+ * an amount — "$", "USD", "Rs", "PKR". Editable like everything else, so a
+ * currency that isn't in the default seed just needs to be added here.
+ */
+@Entity(tableName = "currency_token")
+data class CurrencyToken(
+    @PrimaryKey val token: String,
+    val enabled: Boolean = true
+)
+
 data class CategoryTotal(val category: String?, val totalPaisa: Long)
 data class AccountTotal(val account: String, val totalPaisa: Long)
 
@@ -164,13 +175,28 @@ interface ConfigDao {
     @Delete
     suspend fun deleteIgnore(i: IgnoreRule)
 
+    @Query("SELECT * FROM currency_token")
+    fun currencyTokensFlow(): Flow<List<CurrencyToken>>
+
+    @Query("SELECT * FROM currency_token WHERE enabled = 1")
+    suspend fun currencyTokens(): List<CurrencyToken>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertCurrencyToken(c: CurrencyToken)
+
+    @Delete
+    suspend fun deleteCurrencyToken(c: CurrencyToken)
+
     @Query("SELECT COUNT(*) FROM sender")
     suspend fun senderCount(): Int
 }
 
 @Database(
-    entities = [Txn::class, Rule::class, SenderRule::class, ParseRule::class, IgnoreRule::class],
-    version = 3,
+    entities = [
+        Txn::class, Rule::class, SenderRule::class, ParseRule::class,
+        IgnoreRule::class, CurrencyToken::class
+    ],
+    version = 4,
     exportSchema = false
 )
 abstract class Db : RoomDatabase() {
@@ -180,9 +206,11 @@ abstract class Db : RoomDatabase() {
 }
 
 /**
- * Seeds a starting configuration on first launch. Deliberately conservative:
- * brand-name substrings only, no invented short codes. Add the real numeric
- * senders from your own inbox in Settings.
+ * Seeds a starting configuration on first launch. The senders below are an
+ * example pack (a few Pakistani banks) meant to be replaced, not a default
+ * identity — everything else here (parse rules, ignores, currency tokens)
+ * is deliberately conservative and generic. Add your own real senders from
+ * your own inbox in Settings.
  */
 suspend fun Db.seedIfEmpty() {
     if (config().senderCount() > 0) return
@@ -214,6 +242,11 @@ suspend fun Db.seedIfEmpty() {
         "otp", "one-time password", "do not share", "verification code",
         "available balance is", "mini statement", "lucky draw"
     ).forEach { config().upsertIgnore(IgnoreRule(it)) }
+
+    listOf(
+        "PKR", "Rs.", "Rs", "INR", "₹", "USD", "$", "EUR", "€", "GBP", "£",
+        "JPY", "¥", "AED", "SAR", "CAD", "AUD", "SGD", "MYR", "NGN", "ZAR"
+    ).forEach { config().upsertCurrencyToken(CurrencyToken(it)) }
 }
 
 /**

@@ -12,12 +12,28 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/** Never matches — the safe default before the first config reload completes. */
+private val NO_AMOUNT_MATCH = Regex("(?!)")
+
+/**
+ * Builds the amount-detection regex from the user's Currency tokens
+ * (Settings), so recognising "$45", "Rs 45" or "45 EUR" is configuration,
+ * not code — any currency works once its symbol/code is in the list.
+ */
+private fun buildAmountRegex(tokens: List<String>): Regex {
+    if (tokens.isEmpty()) return NO_AMOUNT_MATCH
+    val alt = tokens.joinToString("|") { Regex.escape(it) }
+    return """(?:$alt)\s*([\d,]+(?:\.\d{1,2})?)|([\d,]+(?:\.\d{1,2})?)\s*(?:$alt)"""
+        .toRegex(RegexOption.IGNORE_CASE)
+}
+
 /** In-memory snapshot of the rules, so the SMS receiver never touches disk. */
 data class ParserConfig(
     val senders: List<SenderRule> = emptyList(),
     val rules: List<ParseRule> = emptyList(),
     val ignores: List<String> = emptyList(),
-    val merchantRules: List<Rule> = emptyList()
+    val merchantRules: List<Rule> = emptyList(),
+    val amountRegex: Regex = NO_AMOUNT_MATCH
 )
 
 /** What the parser decided, and why. Drives the test box in Settings. */
@@ -42,13 +58,10 @@ object SmsParser {
             senders = db.config().senders(),
             rules = db.config().parseRules(),
             ignores = db.config().ignores().map { it.phrase.lowercase() },
-            merchantRules = db.rules().all()
+            merchantRules = db.rules().all(),
+            amountRegex = buildAmountRegex(db.config().currencyTokens().map { it.token })
         )
     }
-
-    private val AMOUNT =
-        """(?:PKR|RS|Rs\.?)\s*([\d,]+(?:\.\d{1,2})?)|([\d,]+(?:\.\d{1,2})?)\s*(?:PKR|RS|Rs\.?)"""
-            .toRegex(RegexOption.IGNORE_CASE)
 
     private val MERCHANT = listOf(
         """(?:at|to|from)\s+([A-Z0-9][A-Za-z0-9 &.\-*']{2,40}?)(?:\s+on\b|\s+for\b|[.,]|$)""",
@@ -148,7 +161,7 @@ object SmsParser {
             )
         }
 
-        val why = if (AMOUNT.containsMatchIn(text))
+        val why = if (config.amountRegex.containsMatchIn(text))
             "Found an amount but no matching debit or credit rule"
         else
             "No amount found in this message"
@@ -156,7 +169,7 @@ object SmsParser {
     }
 
     private fun genericAmount(text: String): Long? =
-        AMOUNT.find(text)?.let { m ->
+        config.amountRegex.find(text)?.let { m ->
             m.groupValues.drop(1).firstOrNull { it.isNotEmpty() }?.let { toPaisa(it) }
         }
 

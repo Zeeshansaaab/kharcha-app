@@ -10,13 +10,22 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -56,6 +65,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val parseRules = db.config().parseRulesFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val ignores = db.config().ignoresFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val currencies = db.config().currencyTokensFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val accounts = senders.map { list -> list.map { it.account }.distinct().sorted() }
@@ -113,6 +124,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun deleteTxn(txn: Txn) = viewModelScope.launch { db.txns().delete(txn.id) }
 
+    /** Cash, or anything else that never sends an SMS. Goes straight into the same table. */
+    fun addManual(
+        direction: Direction, amountPaisa: Long, merchant: String, category: String?, account: String
+    ) = viewModelScope.launch {
+        val now = System.currentTimeMillis()
+        val name = merchant.trim()
+        db.txns().insertAll(listOf(Txn(
+            timestamp = now,
+            monthKey = monthFmt.format(Date(now)),
+            account = account.trim().ifBlank { "Cash" },
+            sender = "",
+            direction = direction,
+            amountPaisa = amountPaisa,
+            merchant = name.lowercase(),
+            rawMerchant = name,
+            category = category,
+            isTransfer = false,
+            source = "manual",
+            body = "",
+            fingerprint = UUID.randomUUID().toString()
+        )))
+    }
+
     /** Re-runs the parser on the stored message so the sheet can show what fired. */
     fun explainFor(txn: Txn): String {
         val e = SmsParser.explain(txn.sender, txn.body)
@@ -158,6 +192,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun addIgnore(phrase: String) = edit { db.config().upsertIgnore(IgnoreRule(phrase)) }
 
     fun deleteIgnore(i: IgnoreRule) = edit { db.config().deleteIgnore(i) }
+
+    fun addCurrency(token: String) = edit { db.config().upsertCurrencyToken(CurrencyToken(token)) }
+
+    fun deleteCurrency(c: CurrencyToken) = edit { db.config().deleteCurrencyToken(c) }
 }
 
 private enum class Route { HOME, SETTINGS }
@@ -182,10 +220,12 @@ class MainActivity : ComponentActivity() {
                 val senders by vm.senders.collectAsState()
                 val parseRules by vm.parseRules.collectAsState()
                 val ignores by vm.ignores.collectAsState()
+                val currencies by vm.currencies.collectAsState()
                 val accounts by vm.accounts.collectAsState()
 
                 var route by remember { mutableStateOf(Route.HOME) }
                 var sheetFor by remember { mutableStateOf<Txn?>(null) }
+                var addingExpense by remember { mutableStateOf(false) }
 
                 val ask = rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestMultiplePermissions()
@@ -215,6 +255,7 @@ class MainActivity : ComponentActivity() {
                             senders = senders,
                             rules = parseRules,
                             ignores = ignores,
+                            currencies = currencies,
                             accounts = accounts,
                             testResult = testResult,
                             importSummary = importSummary(report, importing),
@@ -225,6 +266,8 @@ class MainActivity : ComponentActivity() {
                             onDeleteRule = vm::deleteParseRule,
                             onAddIgnore = vm::addIgnore,
                             onDeleteIgnore = vm::deleteIgnore,
+                            onAddCurrency = vm::addCurrency,
+                            onDeleteCurrency = vm::deleteCurrency,
                             onRescan = vm::rescan,
                             onBack = { route = Route.HOME }
                         )
@@ -236,6 +279,21 @@ class MainActivity : ComponentActivity() {
                             onOpenSettings = { route = Route.SETTINGS }
                         )
                     }
+
+                    if (route == Route.HOME) {
+                        Box(
+                            Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(24.dp)
+                                .size(58.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(Ink.Marigold)
+                                .clickable { addingExpense = true },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("+", color = Ink.Sunk, fontSize = 26.sp)
+                        }
+                    }
                 }
 
                 sheetFor?.let { txn ->
@@ -246,6 +304,18 @@ class MainActivity : ComponentActivity() {
                         onPick = { vm.categorise(txn, it); sheetFor = null },
                         onDelete = { vm.deleteTxn(txn); sheetFor = null },
                         onDismiss = { sheetFor = null }
+                    )
+                }
+
+                if (addingExpense) {
+                    AddExpenseSheet(
+                        categories = DefaultCategories,
+                        accounts = accounts,
+                        onAdd = { direction, amount, merchant, category, account ->
+                            vm.addManual(direction, amount, merchant, category, account)
+                            addingExpense = false
+                        },
+                        onDismiss = { addingExpense = false }
                     )
                 }
             }

@@ -351,27 +351,29 @@ fun CategoriseSheet(
                 style = MaterialTheme.typography.labelSmall, color = Ink.Faint
             )
 
-            Spacer(Modifier.height(20.dp))
-            Text("Original message", style = MaterialTheme.typography.labelSmall, color = Ink.Faint)
-            Spacer(Modifier.height(8.dp))
-            Column(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-                    .background(Ink.Sunk).padding(13.dp)
-            ) {
-                Text(
-                    txn.body,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Ink.Chalk2,
-                    lineHeight = 19.sp
-                )
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    "From ${txn.sender}",
-                    style = MaterialTheme.typography.labelSmall, color = Ink.Ghost
-                )
-                explanation?.let {
-                    Spacer(Modifier.height(4.dp))
-                    Text(it, style = MaterialTheme.typography.labelSmall, color = Ink.Muted)
+            if (txn.source != "manual") {
+                Spacer(Modifier.height(20.dp))
+                Text("Original message", style = MaterialTheme.typography.labelSmall, color = Ink.Faint)
+                Spacer(Modifier.height(8.dp))
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                        .background(Ink.Sunk).padding(13.dp)
+                ) {
+                    Text(
+                        txn.body,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Ink.Chalk2,
+                        lineHeight = 19.sp
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "From ${txn.sender}",
+                        style = MaterialTheme.typography.labelSmall, color = Ink.Ghost
+                    )
+                    explanation?.let {
+                        Spacer(Modifier.height(4.dp))
+                        Text(it, style = MaterialTheme.typography.labelSmall, color = Ink.Muted)
+                    }
                 }
             }
 

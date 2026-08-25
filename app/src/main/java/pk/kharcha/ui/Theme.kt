@@ -98,6 +98,6 @@ fun KharchaTheme(content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = scheme, typography = typography, content = content)
 }
 
-/** 1234567 paisa -> "12,345". Rupees only; paisa are noise at this scale. */
+/** 1234567 paisa -> "12,345". Whole units only; the minor unit is noise at this scale. */
 fun Long.asRupees(): String =
-    java.text.NumberFormat.getIntegerInstance(java.util.Locale("en", "PK")).format(this / 100)
+    java.text.NumberFormat.getIntegerInstance(java.util.Locale.getDefault()).format(this / 100)

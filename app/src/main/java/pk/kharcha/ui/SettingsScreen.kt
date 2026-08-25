@@ -14,6 +14,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import pk.kharcha.data.CurrencyToken
 import pk.kharcha.data.Direction
 import pk.kharcha.data.IgnoreRule
 import pk.kharcha.data.MatchType
@@ -26,6 +27,7 @@ fun SettingsScreen(
     senders: List<SenderRule>,
     rules: List<ParseRule>,
     ignores: List<IgnoreRule>,
+    currencies: List<CurrencyToken>,
     accounts: List<String>,
     testResult: Explanation?,
     importSummary: String,
@@ -36,6 +38,8 @@ fun SettingsScreen(
     onDeleteRule: (ParseRule) -> Unit,
     onAddIgnore: (String) -> Unit,
     onDeleteIgnore: (IgnoreRule) -> Unit,
+    onAddCurrency: (String) -> Unit,
+    onDeleteCurrency: (CurrencyToken) -> Unit,
     onRescan: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -67,7 +71,7 @@ fun SettingsScreen(
             var testSender by remember { mutableStateOf("") }
             var testBody by remember { mutableStateOf("") }
 
-            Field(testSender, { testSender = it }, "Sender, e.g. 8558 or HBLPK")
+            Field(testSender, { testSender = it }, "Sender, e.g. 8558 or a bank's short code")
             Spacer(Modifier.height(8.dp))
             Field(testBody, { testBody = it }, "Paste the full SMS text", lines = 4)
             Spacer(Modifier.height(10.dp))
@@ -97,7 +101,11 @@ fun SettingsScreen(
 
         SectionCard {
             SectionLabel("Senders")
-            Hint("Match a sender ID or short code to an account. Plain text, not a pattern — \"8558\" or \"hblpk\".")
+            Hint(
+                "Match a sender ID or short code to an account. Plain text, not a pattern — " +
+                    "\"8558\" or \"hblpk\". Pre-filled with a few example banks — delete these " +
+                    "and add your own if they don't match."
+            )
             senders.forEachIndexed { index, s ->
                 RowItem("${s.pattern}  →  ${s.account}") { onDeleteSender(s) }
                 if (index < senders.lastIndex) HorizontalDivider(color = Ink.Line, thickness = 1.dp)
@@ -108,7 +116,7 @@ fun SettingsScreen(
             Spacer(Modifier.height(10.dp))
             Field(newPattern, { newPattern = it }, "Sender text or number")
             Spacer(Modifier.height(8.dp))
-            Field(newAccount, { newAccount = it }, "Account name, e.g. Bank Alfalah")
+            Field(newAccount, { newAccount = it }, "Account name, e.g. your bank's name")
             if (accounts.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
                 Chips(accounts) { newAccount = it }
@@ -158,6 +166,25 @@ fun SettingsScreen(
                         ruleValue.trim()
                     )
                     ruleValue = ""
+                }
+            }
+        }
+
+        SectionCard {
+            SectionLabel("Currency")
+            Hint("Symbols or codes the parser looks for next to a number, e.g. $ or USD.")
+            currencies.forEachIndexed { index, c ->
+                RowItem(c.token) { onDeleteCurrency(c) }
+                if (index < currencies.lastIndex) HorizontalDivider(color = Ink.Line, thickness = 1.dp)
+            }
+
+            var newCurrency by remember { mutableStateOf("") }
+            Spacer(Modifier.height(10.dp))
+            Field(newCurrency, { newCurrency = it }, "Symbol or code, e.g. USD")
+            Spacer(Modifier.height(10.dp))
+            Action("Add currency") {
+                if (newCurrency.isNotBlank()) {
+                    onAddCurrency(newCurrency.trim()); newCurrency = ""
                 }
             }
         }
