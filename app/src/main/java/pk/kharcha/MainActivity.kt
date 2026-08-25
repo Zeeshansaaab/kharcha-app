@@ -8,15 +8,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -26,6 +25,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import pk.kharcha.data.*
+import pk.kharcha.parse.Explanation
+import pk.kharcha.parse.SmsParser
 import pk.kharcha.sms.Backfill
 import pk.kharcha.sms.ImportReport
 import pk.kharcha.sms.Repo
@@ -49,6 +50,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     val report = MutableStateFlow<ImportReport?>(null)
     val importing = MutableStateFlow(false)
+    val testResult = MutableStateFlow<Explanation?>(null)
+
+    val senders = db.config().sendersFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val parseRules = db.config().parseRulesFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val ignores = db.config().ignoresFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val accounts = senders.map { list -> list.map { it.account }.distinct().sorted() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val state: StateFlow<MonthState> = month.flatMapLatest { key ->
         val previous = (cursor.value.clone() as Calendar).apply { add(Calendar.MONTH, -1) }
@@ -80,6 +92,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         MonthState(labelFmt.format(Date()), "", 0, null, emptyList(), emptyList(), emptyList(), 0)
     )
 
+    init {
+        viewModelScope.launch {
+            db.seedIfEmpty()
+            SmsParser.reload(db)
+        }
+    }
+
     fun stepMonth(delta: Int) {
         cursor.value = (cursor.value.clone() as Calendar).apply { add(Calendar.MONTH, delta) }
     }
@@ -98,7 +117,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         report.value = Backfill.run(getApplication<Application>().contentResolver, db)
         importing.value = false
     }
+
+    fun rescan() = viewModelScope.launch {
+        if (importing.value) return@launch
+        importing.value = true
+        report.value = Backfill.rescan(getApplication<Application>().contentResolver, db)
+        importing.value = false
+    }
+
+    fun test(sender: String, body: String) {
+        testResult.value = SmsParser.explain(sender, body)
+    }
+
+    // Every config change reloads the parser cache, so the test box and the
+    // live SMS receiver always agree with what's on screen.
+    private fun edit(block: suspend () -> Unit) = viewModelScope.launch {
+        block()
+        SmsParser.reload(db)
+    }
+
+    fun addSender(pattern: String, account: String) =
+        edit { db.config().upsertSender(SenderRule(pattern, account)) }
+
+    fun deleteSender(s: SenderRule) = edit { db.config().deleteSender(s) }
+
+    fun addParseRule(account: String?, dir: Direction, type: MatchType, value: String) =
+        edit { db.config().upsertParseRule(ParseRule(0, account, dir, type, value)) }
+
+    fun deleteParseRule(r: ParseRule) = edit { db.config().deleteParseRule(r) }
+
+    fun addIgnore(phrase: String) = edit { db.config().upsertIgnore(IgnoreRule(phrase)) }
+
+    fun deleteIgnore(i: IgnoreRule) = edit { db.config().deleteIgnore(i) }
 }
+
+private enum class Route { HOME, SETTINGS }
 
 class MainActivity : ComponentActivity() {
 
@@ -111,8 +164,14 @@ class MainActivity : ComponentActivity() {
                 val state by vm.state.collectAsState()
                 val report by vm.report.collectAsState()
                 val importing by vm.importing.collectAsState()
+                val testResult by vm.testResult.collectAsState()
+                val senders by vm.senders.collectAsState()
+                val parseRules by vm.parseRules.collectAsState()
+                val ignores by vm.ignores.collectAsState()
+                val accounts by vm.accounts.collectAsState()
+
+                var route by remember { mutableStateOf(Route.HOME) }
                 var sheetFor by remember { mutableStateOf<Txn?>(null) }
-                var showDebug by remember { mutableStateOf(false) }
 
                 val ask = rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestMultiplePermissions()
@@ -129,25 +188,39 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                if (showDebug) {
-                    DebugScreen(report, importing, onBack = { showDebug = false })
-                } else {
-                    Box(Modifier.fillMaxSize()) {
+                when (route) {
+                    Route.SETTINGS -> SettingsScreen(
+                        senders = senders,
+                        rules = parseRules,
+                        ignores = ignores,
+                        accounts = accounts,
+                        testResult = testResult,
+                        importSummary = importSummary(report, importing),
+                        onTest = vm::test,
+                        onAddSender = vm::addSender,
+                        onDeleteSender = vm::deleteSender,
+                        onAddRule = vm::addParseRule,
+                        onDeleteRule = vm::deleteParseRule,
+                        onAddIgnore = vm::addIgnore,
+                        onDeleteIgnore = vm::deleteIgnore,
+                        onRescan = vm::rescan,
+                        onBack = { route = Route.HOME }
+                    )
+
+                    Route.HOME -> Box(Modifier.fillMaxSize()) {
                         HomeScreen(
                             state = state,
                             onMonthStep = vm::stepMonth,
                             onCategorise = { sheetFor = it }
                         )
-                        // Tucked in the corner rather than in the nav bar: this
-                        // is a tool for building the app, not for using it.
                         Text(
-                            "debug",
-                            color = Ink.Ghost,
-                            fontSize = 11.sp,
+                            "Settings",
+                            color = Ink.Faint,
+                            fontSize = 12.sp,
                             modifier = Modifier
-                                .align(androidx.compose.ui.Alignment.TopEnd)
-                                .clickable { showDebug = true }
-                                .padding(14.dp)
+                                .align(Alignment.TopEnd)
+                                .clickable { route = Route.SETTINGS }
+                                .padding(16.dp)
                         )
                     }
                 }
@@ -165,56 +238,28 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable
-private fun DebugScreen(report: ImportReport?, importing: Boolean, onBack: () -> Unit) {
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(Ink.Ground)
-            .verticalScroll(rememberScrollState())
-            .padding(18.dp)
-    ) {
-        Text("Import report", color = Ink.Chalk, fontSize = 20.sp,
-            modifier = Modifier.clickable { onBack() })
-        Spacer(Modifier.height(4.dp))
-        Text("Tap the title to go back", color = Ink.Faint, fontSize = 12.sp)
-        Spacer(Modifier.height(20.dp))
+/**
+ * The import counters plus the messages that didn't parse. A zero result should
+ * always say why, rather than leaving you staring at an empty month.
+ */
+private fun importSummary(report: ImportReport?, importing: Boolean): String = when {
+    importing -> "Reading inbox…"
+    report == null -> ""
+    report.error != null -> report.error!!
+    else -> buildString {
+        appendLine("inbox      ${report.inboxTotal}")
+        appendLine("known      ${report.knownSender}")
+        appendLine("imported   ${report.imported}")
 
-        when {
-            importing -> Text("Reading inbox…", color = Ink.Marigold, fontSize = 14.sp)
-            report == null -> Text("No import has run.", color = Ink.Faint, fontSize = 14.sp)
-            report.error != null -> Text(report.error!!, color = Ink.Clay, fontSize = 14.sp)
-            else -> {
-                Line("Messages in inbox", report.inboxTotal.toString())
-                Line("From a known sender", report.knownSender.toString())
-                Line("Parse attempted", report.attempted.toString())
-                Line("Imported", report.imported.toString())
-
-                Spacer(Modifier.height(22.dp))
-                Text("Senders seen", color = Ink.Faint, fontSize = 12.sp)
-                Spacer(Modifier.height(8.dp))
-                report.senders.forEach { (s, n) -> Line(s, n.toString()) }
-
-                Spacer(Modifier.height(22.dp))
-                Text("Messages that did not parse", color = Ink.Faint, fontSize = 12.sp)
-                Spacer(Modifier.height(8.dp))
-                report.samples.forEach {
-                    Text(it, color = Ink.Chalk2, fontSize = 12.sp,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.padding(bottom = 12.dp))
-                }
-                if (report.samples.isEmpty()) {
-                    Text("None captured.", color = Ink.Ghost, fontSize = 12.sp)
-                }
-            }
+        if (report.senders.isNotEmpty()) {
+            appendLine()
+            appendLine("senders matched")
+            report.senders.forEach { (s, n) -> appendLine("  $s  ×$n") }
         }
-    }
-}
-
-@Composable
-private fun Line(label: String, value: String) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Text(label, color = Ink.Chalk2, fontSize = 13.sp, modifier = Modifier.weight(1f))
-        Text(value, color = Ink.Chalk, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+        if (report.samples.isNotEmpty()) {
+            appendLine()
+            appendLine("did not parse")
+            report.samples.forEach { appendLine("  $it") }
+        }
     }
 }
